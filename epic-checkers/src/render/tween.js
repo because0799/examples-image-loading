@@ -1,0 +1,540 @@
+// Game clock + tween engine.
+//
+//   const clock = new Clock();             // the Renderer drives it from the Pixi ticker
+//   clock.setScale(0.25, 200);             // smooth slow-mo (transition runs in REAL time)
+//   clock.hitStop(90);                     // freeze game time for 90 real ms, then restore
+//   await tween(sprite, { x: 100, 'scale.x': 2, tint: 0xff0000 }, { duration: 300, ease: 'outBack' });
+//   await wait(500);                       // game time (slow-mo aware)
+//   await wait(500, { realtime: true });   // real time (ignores slow-mo / hit-stop)
+//
+// Every tween()/wait() promise has .cancel(finish = false): cancelling resolves the promise with
+// `false` (never rejects, so fire-and-forget code is safe); cancel(true) jumps to the end values
+// first and resolves with `true`. Note that `.then()` returns a plain promise without cancel().
+//
+// Props: numeric properties, dotted paths ('scale.x', 'pivot.y'), and colours — keys named `tint`
+// or ending in `Color` are interpolated per RGB channel. A value may be [from, to] to force a start
+// value (applied immediately, even when the tween has a delay).
+
+// ------------------------------------------------------------------------------------- easing
+const c1 = 1.70158;
+const c2 = c1 * 1.525;
+const c3 = c1 + 1;
+const c4 = (2 * Math.PI) / 3;
+const c5 = (2 * Math.PI) / 4.5;
+
+function bounceOut(t) {
+  const n1 = 7.5625;
+  const d1 = 2.75;
+  if (t < 1 / d1) return n1 * t * t;
+  if (t < 2 / d1) return n1 * (t -= 1.5 / d1) * t + 0.75;
+  if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375;
+  return n1 * (t -= 2.625 / d1) * t + 0.984375;
+}
+
+export const Ease = {
+  linear: (t) => t,
+  inQuad: (t) => t * t,
+  outQuad: (t) => t * (2 - t),
+  inOutQuad: (t) => (t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) * (-2 * t + 2)) / 2),
+  inCubic: (t) => t * t * t,
+  outCubic: (t) => 1 - (1 - t) * (1 - t) * (1 - t),
+  inOutCubic: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
+  inQuart: (t) => t * t * t * t,
+  outQuart: (t) => 1 - Math.pow(1 - t, 4),
+  inOutQuart: (t) => (t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2),
+  inQuint: (t) => t * t * t * t * t,
+  outQuint: (t) => 1 - Math.pow(1 - t, 5),
+  inOutQuint: (t) => (t < 0.5 ? 16 * t * t * t * t * t : 1 - Math.pow(-2 * t + 2, 5) / 2),
+  inSine: (t) => 1 - Math.cos((t * Math.PI) / 2),
+  outSine: (t) => Math.sin((t * Math.PI) / 2),
+  inOutSine: (t) => -(Math.cos(Math.PI * t) - 1) / 2,
+  inExpo: (t) => (t === 0 ? 0 : Math.pow(2, 10 * t - 10)),
+  outExpo: (t) => (t === 1 ? 1 : 1 - Math.pow(2, -10 * t)),
+  inOutExpo: (t) =>
+    t === 0 ? 0 : t === 1 ? 1 : t < 0.5 ? Math.pow(2, 20 * t - 10) / 2 : (2 - Math.pow(2, -20 * t + 10)) / 2,
+  inCirc: (t) => 1 - Math.sqrt(1 - t * t),
+  outCirc: (t) => Math.sqrt(1 - (t - 1) * (t - 1)),
+  inOutCirc: (t) =>
+    t < 0.5 ? (1 - Math.sqrt(1 - 4 * t * t)) / 2 : (Math.sqrt(1 - Math.pow(-2 * t + 2, 2)) + 1) / 2,
+  inBack: (t) => c3 * t * t * t - c1 * t * t,
+  outBack: (t) => 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2),
+  inOutBack: (t) =>
+    t < 0.5
+      ? (Math.pow(2 * t, 2) * ((c2 + 1) * 2 * t - c2)) / 2
+      : (Math.pow(2 * t - 2, 2) * ((c2 + 1) * (t * 2 - 2) + c2) + 2) / 2,
+  inElastic: (t) => (t === 0 ? 0 : t === 1 ? 1 : -Math.pow(2, 10 * t - 10) * Math.sin((t * 10 - 10.75) * c4)),
+  outElastic: (t) => (t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1),
+  inOutElastic: (t) =>
+    t === 0
+      ? 0
+      : t === 1
+        ? 1
+        : t < 0.5
+          ? -(Math.pow(2, 20 * t - 10) * Math.sin((20 * t - 11.125) * c5)) / 2
+          : (Math.pow(2, -20 * t + 10) * Math.sin((20 * t - 11.125) * c5)) / 2 + 1,
+  inBounce: (t) => 1 - bounceOut(1 - t),
+  outBounce: bounceOut,
+  inOutBounce: (t) => (t < 0.5 ? (1 - bounceOut(1 - 2 * t)) / 2 : (1 + bounceOut(2 * t - 1)) / 2),
+  smoothstep: (t) => t * t * (3 - 2 * t),
+  /** Configurable overshoot: Ease.backOut(2.4) */
+  backOut: (s = c1) => (t) => 1 + (s + 1) * Math.pow(t - 1, 3) + s * Math.pow(t - 1, 2),
+  /** 0 → 1 → 0 hump, handy for flashes: ease(t) peaks at t = 0.5 */
+  pulse: (t) => Math.sin(Math.PI * t),
+};
+
+/** Accepts an easing function or a name from Ease; falls back to outCubic. */
+export function resolveEase(e, fallback = Ease.outCubic) {
+  if (typeof e === 'function') return e;
+  if (typeof e === 'string' && typeof Ease[e] === 'function' && e !== 'backOut') return Ease[e];
+  return fallback;
+}
+
+// ------------------------------------------------------------------------------------- colours
+export function lerpColor(a, b, t) {
+  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+  return (
+    (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t)
+  );
+}
+
+function isColorKey(key) {
+  return key === 'tint' || key.endsWith('Color') || key.endsWith('color');
+}
+
+// ------------------------------------------------------------------------------------- clock
+let clockIds = 0;
+
+/**
+ * Game clock. `now` advances by real delta × `scale`; `realNow` by real delta.
+ * Tasks (tweens / waits) and per-frame listeners run inside update().
+ */
+export class Clock {
+  constructor() {
+    this.id = ++clockIds;
+    /** current time scale (0 = frozen, 1 = normal, 0.2 = slow-mo) */
+    this.scale = 1;
+    /** game time in ms */
+    this.now = 0;
+    /** real time in ms (since the clock started) */
+    this.realNow = 0;
+    /** game delta of the last frame (ms) */
+    this.delta = 0;
+    /** real delta of the last frame (ms) */
+    this.realDelta = 0;
+    this.frame = 0;
+    /** largest real delta accepted per frame (protects animations after a pause / tab switch) */
+    this.maxDelta = 50;
+
+    this._scaleFrom = 1;
+    this._scaleTo = 1;
+    this._scaleElapsed = 0;
+    this._scaleDuration = 0;
+    this._scaleEase = Ease.inOutQuad;
+    this._scaleToken = 0;
+
+    this._tasks = [];
+    this._incoming = [];
+    this._iterating = false;
+
+    this._listeners = [];
+    this._listenersDirty = false;
+
+    this._autoHandle = 0;
+    this._autoLast = 0;
+    this._wantsAuto = false;
+  }
+
+  /** Smoothly change the time scale. The transition always runs in real time. */
+  setScale(v, transitionMs = 0, ease = Ease.inOutQuad) {
+    v = Math.max(0, +v || 0);
+    this._scaleToken++;
+    if (!transitionMs || transitionMs <= 0) {
+      this.scale = v;
+      this._scaleFrom = this._scaleTo = v;
+      this._scaleDuration = 0;
+      return;
+    }
+    this._scaleFrom = this.scale;
+    this._scaleTo = v;
+    this._scaleElapsed = 0;
+    this._scaleDuration = transitionMs;
+    this._scaleEase = resolveEase(ease, Ease.inOutQuad);
+  }
+
+  /** Target time scale (the value scale is transitioning to). */
+  get targetScale() {
+    return this._scaleTo;
+  }
+
+  /**
+   * Hit-stop: freeze game time for `ms` real milliseconds, then restore the previous scale.
+   * If something else changes the scale meanwhile, that change wins (no restore).
+   */
+  hitStop(ms = 80, freezeScale = 0.02) {
+    const restore = this._scaleTo;
+    this.setScale(freezeScale, 0);
+    const token = this._scaleToken;
+    return wait(ms, { clock: this, realtime: true }).then(() => {
+      if (this._scaleToken === token) this.setScale(restore, 0);
+    });
+  }
+
+  /**
+   * Slow motion: ease into `scale`, hold for `ms` (real time), ease back to 1.
+   * Resolves when back to normal (or when overridden by another setScale call).
+   */
+  slowMo(scale = 0.3, ms = 600, { inMs = 120, outMs = 260 } = {}) {
+    this.setScale(scale, inMs);
+    const token = this._scaleToken;
+    return wait(inMs + ms, { clock: this, realtime: true }).then(() => {
+      if (this._scaleToken !== token) return;
+      this.setScale(1, outMs);
+      return wait(outMs, { clock: this, realtime: true });
+    });
+  }
+
+  /** Per-frame listener: fn(gameDeltaMs, realDeltaMs, clock). Returns an unsubscribe function. */
+  add(fn, context = null) {
+    this._listeners.push({ fn, context, dead: false });
+    return () => this.remove(fn, context);
+  }
+
+  remove(fn, context = null) {
+    for (const l of this._listeners) {
+      if (l.fn === fn && l.context === context && !l.dead) {
+        l.dead = true;
+        this._listenersDirty = true;
+        break;
+      }
+    }
+  }
+
+  /** Advance the clock by a real delta (ms). Called once per frame by the driver. */
+  update(realDeltaMs) {
+    let dt = +realDeltaMs || 0;
+    if (dt < 0) dt = 0;
+    if (dt > this.maxDelta) dt = this.maxDelta;
+    this.frame++;
+
+    if (this._scaleDuration > 0) {
+      this._scaleElapsed += dt;
+      const k = Math.min(1, this._scaleElapsed / this._scaleDuration);
+      this.scale = this._scaleFrom + (this._scaleTo - this._scaleFrom) * this._scaleEase(k);
+      if (k >= 1) {
+        this.scale = this._scaleTo;
+        this._scaleDuration = 0;
+      }
+    }
+
+    const gdt = dt * this.scale;
+    this.realDelta = dt;
+    this.delta = gdt;
+    this.realNow += dt;
+    this.now += gdt;
+
+    // tasks
+    if (this._incoming.length) {
+      for (let i = 0; i < this._incoming.length; i++) this._tasks.push(this._incoming[i]);
+      this._incoming.length = 0;
+    }
+    const tasks = this._tasks;
+    if (tasks.length) {
+      this._iterating = true;
+      let w = 0;
+      for (let i = 0; i < tasks.length; i++) {
+        const t = tasks[i];
+        if (!t.done) t.step(t.realtime ? dt : gdt);
+        if (!t.done) tasks[w++] = t;
+      }
+      tasks.length = w;
+      this._iterating = false;
+    }
+
+    // listeners
+    const ls = this._listeners;
+    for (let i = 0; i < ls.length; i++) {
+      const l = ls[i];
+      if (!l.dead) l.fn.call(l.context, gdt, dt, this);
+    }
+    if (this._listenersDirty) {
+      let w = 0;
+      for (let i = 0; i < ls.length; i++) if (!ls[i].dead) ls[w++] = ls[i];
+      ls.length = w;
+      this._listenersDirty = false;
+    }
+  }
+
+  /** @internal */
+  _addTask(task) {
+    if (this._iterating) this._incoming.push(task);
+    else this._tasks.push(task);
+    if (!this._autoHandle && this._wantsAuto) this.startAuto();
+  }
+
+  /** Number of running tweens/waits (debug). */
+  get activeTasks() {
+    let n = 0;
+    for (const t of this._tasks) if (!t.done) n++;
+    return n + this._incoming.length;
+  }
+
+  /** Cancel every task that targets `target` (all tasks when target is omitted). */
+  cancelTweensOf(target, finish = false) {
+    const all = this._tasks.concat(this._incoming);
+    for (const t of all) {
+      if (!t.done && (target === undefined || t.target === target)) t.cancel(finish);
+    }
+  }
+
+  /**
+   * Drive the clock by itself with requestAnimationFrame (used for the default clock when no
+   * renderer exists, e.g. in tests). The Renderer drives its clock from the Pixi ticker instead.
+   */
+  startAuto() {
+    this._wantsAuto = true;
+    if (this._autoHandle) return;
+    const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (f) => setTimeout(() => f(nowMs()), 16);
+    const loop = (ts) => {
+      const t = typeof ts === 'number' ? ts : nowMs();
+      const d = this._autoLast ? t - this._autoLast : 16;
+      this._autoLast = t;
+      this.update(d);
+      if (this._wantsAuto && (this._tasks.length || this._incoming.length || this._listeners.length)) {
+        this._autoHandle = raf(loop);
+      } else {
+        this._autoHandle = 0;
+        this._autoLast = 0;
+      }
+    };
+    this._autoHandle = raf(loop);
+  }
+
+  stopAuto() {
+    this._wantsAuto = false;
+  }
+}
+
+function nowMs() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+// default clock -------------------------------------------------------------------------------
+let defaultClock = null;
+
+/** The clock used by tween()/wait() when no clock option is given. */
+export function getDefaultClock() {
+  if (!defaultClock) {
+    defaultClock = new Clock();
+    defaultClock._wantsAuto = true;
+  }
+  return defaultClock;
+}
+
+/** The Renderer registers its ticker-driven clock as the default. */
+export function setDefaultClock(clock) {
+  if (defaultClock && defaultClock !== clock && defaultClock._wantsAuto) {
+    // move pending work from the auto clock to the new one so nothing is lost
+    for (const t of defaultClock._tasks.concat(defaultClock._incoming)) if (!t.done) clock._addTask(t);
+    defaultClock._tasks.length = 0;
+    defaultClock._incoming.length = 0;
+    defaultClock.stopAuto();
+  }
+  defaultClock = clock;
+}
+
+// ------------------------------------------------------------------------------------- tasks
+class Task {
+  constructor(clock, duration, delay, realtime) {
+    this.clock = clock;
+    this.duration = Math.max(0, +duration || 0);
+    this.delay = Math.max(0, +delay || 0);
+    this.realtime = !!realtime;
+    this.elapsed = 0;
+    this.done = false;
+    this.started = false;
+    this.target = null;
+    this._resolve = null;
+    this.promise = new Promise((r) => (this._resolve = r));
+  }
+  step(dt) {
+    if (this.delay > 0) {
+      this.delay -= dt;
+      if (this.delay > 0) return;
+      dt = -this.delay;
+      this.delay = 0;
+    }
+    if (!this.started) {
+      this.started = true;
+      this.onStart();
+    }
+    this.elapsed += dt;
+    const k = this.duration > 0 ? Math.min(1, this.elapsed / this.duration) : 1;
+    this.apply(k);
+    if (k >= 1) this.finish(true);
+  }
+  onStart() {}
+  apply() {}
+  finish(completed) {
+    if (this.done) return;
+    this.done = true;
+    if (completed && this.onComplete) this.onComplete();
+    this._resolve(completed);
+  }
+  cancel(jumpToEnd = false) {
+    if (this.done) return;
+    if (jumpToEnd) {
+      if (!this.started) {
+        this.started = true;
+        this.onStart();
+      }
+      this.apply(1);
+      this.finish(true);
+    } else {
+      this.done = true;
+      this._resolve(false);
+    }
+  }
+}
+
+class TweenTask extends Task {
+  constructor(clock, target, props, opts) {
+    super(clock, opts.duration ?? 300, opts.delay, opts.realtime);
+    this.target = target;
+    this.ease = resolveEase(opts.ease);
+    this.onUpdate = opts.onUpdate || null;
+    this.onComplete = opts.onComplete || null;
+    const keys = Object.keys(props);
+    const n = keys.length;
+    this.owners = new Array(n);
+    this.names = new Array(n);
+    this.from = new Float64Array(n);
+    this.to = new Float64Array(n);
+    this.hasFrom = new Uint8Array(n);
+    this.isColor = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const key = keys[i];
+      let owner = target;
+      let name = key;
+      if (key.indexOf('.') > 0) {
+        const parts = key.split('.');
+        for (let j = 0; j < parts.length - 1; j++) owner = owner[parts[j]];
+        name = parts[parts.length - 1];
+      }
+      this.owners[i] = owner;
+      this.names[i] = name;
+      this.isColor[i] = isColorKey(name) ? 1 : 0;
+      const v = props[key];
+      if (Array.isArray(v)) {
+        this.hasFrom[i] = 1;
+        this.from[i] = +v[0];
+        this.to[i] = +v[1];
+        owner[name] = +v[0];
+      } else {
+        this.to[i] = +v;
+      }
+    }
+  }
+  onStart() {
+    for (let i = 0; i < this.owners.length; i++) {
+      if (!this.hasFrom[i]) {
+        const cur = this.owners[i][this.names[i]];
+        this.from[i] = typeof cur === 'number' ? cur : this.isColor[i] ? 0xffffff : 0;
+      }
+    }
+  }
+  apply(k) {
+    const e = k >= 1 ? 1 : this.ease(k);
+    const owners = this.owners;
+    for (let i = 0; i < owners.length; i++) {
+      const a = this.from[i];
+      const b = this.to[i];
+      owners[i][this.names[i]] = this.isColor[i] ? lerpColor(a, b, k >= 1 ? 1 : Math.max(0, Math.min(1, e))) : a + (b - a) * e;
+    }
+    if (this.onUpdate) this.onUpdate(e, k, this.target);
+  }
+}
+
+class WaitTask extends Task {
+  constructor(clock, ms, realtime) {
+    super(clock, ms, 0, realtime);
+  }
+}
+
+class CallbackTask extends Task {
+  constructor(clock, duration, fn, opts) {
+    super(clock, duration, opts.delay, opts.realtime);
+    this.fn = fn;
+    this.ease = resolveEase(opts.ease, Ease.linear);
+    this.onComplete = opts.onComplete || null;
+  }
+  apply(k) {
+    this.fn(k >= 1 ? 1 : this.ease(k), k);
+  }
+}
+
+function wrap(task) {
+  const p = task.promise;
+  p.cancel = (jumpToEnd = false) => task.cancel(jumpToEnd);
+  p.task = task;
+  return p;
+}
+
+/**
+ * Tween numeric properties of `target`.
+ * @param {object} target
+ * @param {object} props  { key: to | [from, to] }, dotted keys allowed, `tint`/`*Color` keys are colours
+ * @param {object} [o]    { duration=300, ease='outCubic', delay=0, clock, realtime=false, onUpdate(e, k, target), onComplete }
+ * @returns {Promise<boolean> & { cancel(jumpToEnd?: boolean): void }}
+ */
+export function tween(target, props, o = {}) {
+  const clock = o.clock || getDefaultClock();
+  const task = new TweenTask(clock, target, props, o);
+  if (task.duration <= 0 && task.delay <= 0) {
+    task.started = true;
+    task.onStart();
+    task.apply(1);
+    task.finish(true);
+    return wrap(task);
+  }
+  clock._addTask(task);
+  return wrap(task);
+}
+
+/** Wait `ms` of game time (or real time with { realtime: true }). Cancellable. */
+export function wait(ms, o = {}) {
+  const clock = o.clock || getDefaultClock();
+  const task = new WaitTask(clock, ms, o.realtime);
+  if (task.duration <= 0) {
+    task.finish(true);
+    return wrap(task);
+  }
+  clock._addTask(task);
+  return wrap(task);
+}
+
+/**
+ * Run fn(easedProgress, rawProgress) every frame for `duration` ms. Cancellable like tween().
+ * Handy for custom animations (paths, arcs) without a target object.
+ */
+export function animate(duration, fn, o = {}) {
+  const clock = o.clock || getDefaultClock();
+  const task = new CallbackTask(clock, duration, fn, o);
+  if (task.duration <= 0 && task.delay <= 0) {
+    task.started = true;
+    task.apply(1);
+    task.finish(true);
+    return wrap(task);
+  }
+  clock._addTask(task);
+  return wrap(task);
+}
+
+/** Cancel all tweens of `target` on a clock (default clock when omitted). */
+export function killTweensOf(target, { clock, finish = false } = {}) {
+  (clock || getDefaultClock()).cancelTweensOf(target, finish);
+}
+
+/** Small helpers shared by render/fx code. */
+export const lerp = (a, b, t) => a + (b - a) * t;
+export const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);

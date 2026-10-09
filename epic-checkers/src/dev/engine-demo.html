@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>engine-demo — EPIC ШАШКИ rules lab</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  :root { --bg: #05030C; --bg2: #120A2A; --cyan: #29E6FF; --red: #FF2E63; --gold: #FFD23F; --txt: #EDE8FF; --dim: #9A92B8;
+    --maple: #E8D5B0; --walnut: #6B3F22; --move: #3DDC97; --cap: #FF4D4D; --last: rgba(255,181,71,.35); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: linear-gradient(180deg, var(--bg), var(--bg2)); color: var(--txt); min-height: 100%;
+    font-family: Oswald, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
+  body { padding: 10px 12px 40px; max-width: 560px; margin: 0 auto; }
+  h1 { font-family: 'Dela Gothic One', sans-serif; font-weight: 400; font-size: 20px; margin: 2px 0;
+    background: linear-gradient(90deg, var(--cyan), var(--gold), var(--red)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+  select, button, input[type=text] { font: 500 14px Oswald, sans-serif; color: var(--txt); background: #1b1238; border: 1px solid #3a2a6e;
+    border-radius: 8px; padding: 8px 10px; }
+  button { cursor: pointer; touch-action: manipulation; }
+  button:active { transform: scale(.96); }
+  label { font-size: 14px; color: var(--dim); display: flex; align-items: center; gap: 4px; }
+  #board { display: grid; width: 100%; aspect-ratio: 1; border: 6px solid #2A1A10; border-radius: 6px; margin: 8px 0; user-select: none; }
+  .cell { position: relative; background: var(--maple); display: flex; align-items: center; justify-content: center; }
+  .cell.dark { background: var(--walnut); }
+  .cell.last::after { content: ''; position: absolute; inset: 0; background: var(--last); }
+  .cell.sel { box-shadow: inset 0 0 0 3px var(--gold); }
+  .cell .dot { position: absolute; width: 30%; height: 30%; border-radius: 50%; background: var(--move); opacity: .9; z-index: 2; }
+  .cell.capt .dot { background: transparent; border: 3px solid var(--cap); width: 70%; height: 70%; }
+  .cell .name { position: absolute; left: 2px; top: 0; font-size: 9px; color: rgba(255,255,255,.45); }
+  .pc { width: 78%; height: 78%; border-radius: 50%; z-index: 1; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; box-shadow: 0 2px 4px rgba(0,0,0,.5), inset 0 -3px 0 rgba(0,0,0,.25); }
+  .pc.w { background: radial-gradient(circle at 35% 30%, #fff, #F4EEDD 55%, #cbbf9f); color: #8a6a1c; }
+  .pc.b { background: radial-gradient(circle at 35% 30%, #555, #1E1A1A 60%, #000); color: var(--gold); }
+  .pc.k::after { content: '♛'; }
+  .pc.cap { opacity: .35; }
+  #status { font-size: 16px; min-height: 22px; color: var(--gold); }
+  #moves { font-size: 13px; color: var(--dim); line-height: 1.5; max-height: 120px; overflow: auto; }
+  #rules p { font-size: 13px; color: var(--dim); margin: 6px 0; }
+  #pos { width: 100%; font-size: 11px; }
+  .small { font-size: 12px; color: var(--dim); }
+</style>
+</head>
+<body>
+  <h1>EPIC ШАШКИ — rules lab</h1>
+  <div class="bar">
+    <select id="variant"></select>
+    <label><input type="checkbox" id="giveaway"> поддавки</label>
+    <label><input type="checkbox" id="flip"> flip</label>
+  </div>
+  <div class="bar">
+    <button id="reset">Заново</button>
+    <button id="undo">Отмена</button>
+    <button id="random">Случайный ход</button>
+    <button id="auto">Авто ▶</button>
+  </div>
+  <div id="status"></div>
+  <div id="board"></div>
+  <div id="moves"></div>
+  <div class="bar"><input type="text" id="pos" spellcheck="false"><button id="load">Загрузить позицию</button></div>
+  <div class="small" id="info"></div>
+  <div id="rules"></div>
+  <script src="app.js"></script>
+</body>
+</html>

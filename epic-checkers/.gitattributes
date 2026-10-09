@@ -1,0 +1,4 @@
+# Small generated images (icons) are stored directly in git, not in LFS.
+*.png !filter !diff !merge binary
+*.jpg !filter !diff !merge binary
+*.apk binary

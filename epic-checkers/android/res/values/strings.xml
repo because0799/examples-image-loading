@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Default language: Russian. English lives in values-en. -->
+<resources>
+    <string name="app_name">Epic Шашки</string>
+    <string name="webview_missing">Для игры нужен компонент «Android System WebView». Установите или включите его (Google Play → Android System WebView), затем перезапустите игру.</string>
+</resources>

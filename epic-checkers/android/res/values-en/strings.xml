@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Epic Checkers</string>
+    <string name="webview_missing">This game needs the “Android System WebView” component. Install or enable it (Google Play → Android System WebView), then restart the game.</string>
+</resources>

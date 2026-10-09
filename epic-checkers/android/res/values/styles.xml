@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Full-screen, black, no title bar. DeviceDefault (Material on API 21+) keeps WebView's
+      native pop-ups (JS alert/confirm, <select>) looking modern and dark.
+    -->
+    <style name="EpicTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@color/epic_window_bg</item>
+        <item name="android:colorBackground">@color/epic_window_bg</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:statusBarColor">@color/epic_window_bg</item>
+        <item name="android:navigationBarColor">@color/epic_window_bg</item>
+        <item name="android:colorAccent">@color/epic_cyan</item>
+    </style>
+</resources>

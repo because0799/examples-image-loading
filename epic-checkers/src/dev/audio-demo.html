@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>audio-demo — EPIC ШАШКИ audio lab</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  :root { --bg: #05030C; --bg2: #120A2A; --cyan: #29E6FF; --red: #FF2E63; --gold: #FFD23F; --grid: #7A5CFF; --txt: #EDE8FF; --dim: #9A92B8; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: linear-gradient(180deg, var(--bg), var(--bg2)); color: var(--txt); min-height: 100%;
+    font-family: Oswald, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
+  body { padding: 12px 12px 40px; }
+  h1 { font-family: 'Dela Gothic One', sans-serif; font-weight: 400; font-size: 22px; margin: 4px 0 2px; letter-spacing: 1px;
+    background: linear-gradient(90deg, var(--cyan), var(--gold), var(--red)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 10px; }
+  h2 { font-family: 'Russo One', sans-serif; font-weight: 400; font-size: 15px; margin: 16px 0 6px; color: var(--gold); text-transform: uppercase; letter-spacing: 1px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+  button { font: 500 14px Oswald, sans-serif; color: var(--txt); background: #1b1238; border: 1px solid #3a2a6e; border-radius: 8px;
+    padding: 10px 6px; cursor: pointer; touch-action: manipulation; transition: transform .06s, background .2s; }
+  button:active { transform: scale(.96); }
+  button.epic { border-color: #5c1f3c; background: linear-gradient(180deg, #2a0f24, #1b0b1f); }
+  button.music { border-color: #1d5a66; background: linear-gradient(180deg, #0c2830, #0a1a22); }
+  button.on { background: var(--cyan); color: #000; }
+  button.seq { border-color: #7a6020; background: linear-gradient(180deg, #33280a, #1e1706); }
+  button.big { width: 100%; font-size: 18px; padding: 14px; background: linear-gradient(90deg, #1d6f80, #6b1d45); border: 0; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; color: var(--dim); }
+  .row label { width: 120px; flex: none; }
+  .row input[type=range] { flex: 1; accent-color: var(--cyan); }
+  .row output { width: 44px; text-align: right; color: var(--txt); }
+  #meter { width: 100%; height: 64px; background: #000; border-radius: 8px; border: 1px solid #2a2050; display: block; }
+  #status { font-size: 12px; color: var(--dim); margin-top: 4px; min-height: 16px; }
+  table { border-collapse: collapse; font-size: 12px; width: 100%; margin-top: 8px; }
+  th, td { padding: 3px 6px; border-bottom: 1px solid #241a48; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  td.bad { color: var(--red); font-weight: 700; }
+  td.ok { color: #3DDC97; }
+  #viz { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-top: 8px; }
+  .card { background: #0b0718; border: 1px solid #241a48; border-radius: 8px; padding: 4px; }
+  .card .n { font-size: 12px; color: var(--txt); display: flex; justify-content: space-between; padding: 0 2px 2px; }
+  .card .n span { color: var(--dim); }
+  .card canvas { width: 100%; display: block; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>EPIC ШАШКИ · AUDIO LAB</h1>
+  <div class="sub">Процедурный WebAudio: все звуки и музыка синтезируются в реальном времени · procedural SFX + generative music</div>
+  <button class="big" id="unlock">▶ Включить звук / Unlock audio</button>
+  <div id="status"></div>
+  <canvas id="meter" width="800" height="128"></canvas>
+
+  <h2>Параметры SFX</h2>
+  <div class="row"><label>intensity</label><input id="intensity" type="range" min="0" max="2" step="0.05" value="1"><output id="intensityO">1</output></div>
+  <div class="row"><label>pitch</label><input id="pitch" type="range" min="0.5" max="2" step="0.01" value="1"><output id="pitchO">1</output></div>
+  <div class="row"><label>pan</label><input id="pan" type="range" min="-1" max="1" step="0.05" value="0"><output id="panO">0</output></div>
+  <div class="row"><label>delay (ms)</label><input id="delay" type="range" min="0" max="1000" step="10" value="0"><output id="delayO">0</output></div>
+
+  <h2>Классика</h2>
+  <div class="grid" id="classic"></div>
+  <h2>Epic badass</h2>
+  <div class="grid" id="epic"></div>
+
+  <h2>Сцены (как Director)</h2>
+  <div class="grid" id="seqs"></div>
+
+  <h2>Музыка</h2>
+  <div class="grid" id="tracks"></div>
+  <div class="row"><label>epic intensity</label><input id="mint" type="range" min="0" max="1" step="0.01" value="0.35"><output id="mintO">0.35</output></div>
+  <div class="row"><label>fade (ms)</label><input id="fade" type="range" min="0" max="4000" step="50" value="1000"><output id="fadeO">1000</output></div>
+
+  <h2>Микшер</h2>
+  <div class="row"><label>SFX volume</label><input id="sfxv" type="range" min="0" max="1" step="0.01" value="0.8"><output id="sfxvO">0.8</output></div>
+  <div class="row"><label>music volume</label><input id="musv" type="range" min="0" max="1" step="0.01" value="0.6"><output id="musvO">0.6</output></div>
+  <div class="grid" id="mixer"></div>
+
+  <h2>Офлайн-тест (OfflineAudioContext)</h2>
+  <div class="grid" id="tests"></div>
+  <div id="report"></div>
+  <div id="viz"></div>
+  <script src="app.js"></script>
+</body>
+</html>

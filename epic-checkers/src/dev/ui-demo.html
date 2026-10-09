@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#05030C">
+  <title>UI demo — EPIC ШАШКИ</title>
+  <link rel="stylesheet" href="fonts.css">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #05030C;
+      -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; touch-action: none; overscroll-behavior: none; }
+    #stage, #ui { position: fixed; inset: 0; }
+    #stage { z-index: 0; overflow: hidden; }
+    #ui { z-index: 10; pointer-events: none; }
+    /* stand-in for the Pixi canvas backdrop */
+    #stage.bg-classic { background: radial-gradient(90% 60% at 30% 20%, #3a2414 0%, rgba(58,36,20,0) 60%),
+        radial-gradient(80% 60% at 80% 90%, #2a1a10 0%, rgba(42,26,16,0) 60%), linear-gradient(160deg, #1a110b, #0b0806); }
+    #stage.bg-epic { background: radial-gradient(60% 45% at 25% 25%, rgba(122,92,255,.55), rgba(122,92,255,0) 70%),
+        radial-gradient(55% 40% at 80% 70%, rgba(255,46,99,.45), rgba(255,46,99,0) 70%),
+        radial-gradient(50% 40% at 70% 15%, rgba(41,230,255,.25), rgba(41,230,255,0) 70%),
+        linear-gradient(180deg, #05030C, #120A2A); background-size: 160% 160%; animation: nebula 14s ease-in-out infinite alternate; }
+    #stage.bg-plain { background: #05030C !important; animation: none !important; }
+    @keyframes nebula { from { background-position: 0% 0%; } to { background-position: 100% 100%; } }
+    #standin { position: absolute; display: none; }
+  </style>
+</head>
+<body>
+  <div id="stage"><canvas id="standin"></canvas></div>
+  <div id="ui"></div>
+  <script src="app.js"></script>
+</body>
+</html>

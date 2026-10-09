@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window background: pure black so there is never a white flash before the WebView paints. -->
+    <color name="epic_window_bg">#FF000000</color>
+    <!-- Game backdrop (matches web/index.html body background). -->
+    <color name="epic_void">#FF05030C</color>
+    <color name="epic_cyan">#FF29E6FF</color>
+    <color name="epic_crimson">#FFFF2E63</color>
+    <color name="epic_gold">#FFFFD23F</color>
+</resources>

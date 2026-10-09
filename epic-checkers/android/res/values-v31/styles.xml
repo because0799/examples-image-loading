@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ system splash screen: the adaptive icon on the game's void colour. -->
+    <style name="EpicTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@color/epic_window_bg</item>
+        <item name="android:colorBackground">@color/epic_window_bg</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:statusBarColor">@color/epic_window_bg</item>
+        <item name="android:navigationBarColor">@color/epic_window_bg</item>
+        <item name="android:colorAccent">@color/epic_cyan</item>
+        <item name="android:windowSplashScreenBackground">@color/epic_void</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/epic_void</item>
+    </style>
+</resources>

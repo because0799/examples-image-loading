@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <title>AI demo</title>
+  <link rel="stylesheet" href="fonts.css">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    html, body { margin: 0; min-height: 100%; background: #05030C; color: #E8E4FF; }
+    body { font: 13px/1.45 "Oswald", system-ui, sans-serif; padding: 14px 16px 40px; box-sizing: border-box; }
+    h1 { font: 22px/1.1 "Dela Gothic One", "Russo One", sans-serif; margin: 0 0 4px; color: #29E6FF;
+         text-shadow: 0 0 12px rgba(41,230,255,.55); letter-spacing: .5px; }
+    .sub { color: #9C93C9; margin-bottom: 12px; }
+    .mode { display: inline-block; padding: 2px 8px; border-radius: 10px; font-weight: 700; }
+    .mode.worker { background: #133b2b; color: #3DDC97; }
+    .mode.inline { background: #3b1320; color: #FF2E63; }
+    .card { border: 1px solid #2A1F55; border-radius: 10px; padding: 8px 10px; margin: 8px 0;
+            background: linear-gradient(180deg, #120A2A, #0B0620); }
+    .card h2 { font: 15px/1.2 "Russo One", sans-serif; margin: 0 0 6px; color: #FFD23F; }
+    .row { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+    pre.board { font: 11px/1.05 ui-monospace, Menlo, Consolas, monospace; margin: 0; color: #CFC8FF; }
+    .kv { font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; flex: 1; min-width: 180px; }
+    .ok { color: #3DDC97; } .bad { color: #FF4D4D; } .gold { color: #FFD23F; }
+    #status { margin-top: 10px; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>EPIC ШАШКИ · AI</h1>
+  <div class="sub">Проверка ИИ в браузере: Web Worker / резерв в основном потоке. <span id="mode"></span></div>
+  <div id="out"></div>
+  <div id="status">…</div>
+  <script src="app.js"></script>
+</body>
+</html>
