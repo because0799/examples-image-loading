@@ -463,12 +463,18 @@ export class SearchBoard {
     this.deferTop = 0;
   }
 
-  /** Game-history hashes (engine hashState strings, oldest first) for repetition detection. */
+  /**
+   * Game-history hashes (engine hashState strings, oldest first) for repetition detection. Call
+   * after load(): only the last `quiet + 1` positions can recur (older ones precede an
+   * irreversible move), so the rest is skipped.
+   */
   setHistory(hashStrings) {
     this.history = null;
     if (!Array.isArray(hashStrings) || hashStrings.length === 0) return;
     const map = new Map();
-    for (const h of hashStrings) {
+    const from = Math.max(0, hashStrings.length - (this.quiet + 2));
+    for (let k = from; k < hashStrings.length; k++) {
+      const h = hashStrings[k];
       const z = zobristFromHashString(h, this.t.count);
       if (!z) continue;
       const arr = map.get(z.lo);

@@ -4,6 +4,8 @@
 //     -> { path, score, depth, selDepth, nodes, timeMs, nps, level, mate, pv, forced, scores? }
 //   score: side to move's view, 100 = one man; ±(1000000 - plies) = forced win/loss (mate = plies).
 //   allScores: score every root move exactly (slower) → scores: [{ path, score }] best first.
+//   searchAsync(state, opts, { sliceMs, signal }) → Promise: the same search in time slices
+//   that yield to the event loop (main-thread fallback when no Web Worker is available).
 //
 // Negamax alpha-beta (PVS) with iterative deepening and a hard time limit (checked every 1024
 // nodes), a two-slot transposition table keyed by an incremental 64-bit Zobrist hash, move
@@ -153,23 +155,34 @@ function boardFor(variantId, giveaway) {
   return b;
 }
 
-function prepareTables(variantId, giveaway, newGame) {
+/** Make sure the TT / history tables belong to this variant (cleared when it changes). */
+function ensureTables(variantId, giveaway, newGame) {
   const key = `${variantId}|${giveaway ? 1 : 0}`;
   if (!S.tt) S.tt = new TranspositionTable(ttBitsDefault);
+  let fresh = false;
   if (S.ttKey !== key || newGame) {
     S.tt.clear();
     S.ttKey = key;
+    fresh = true;
   }
-  S.tt.newSearch();
   const t = S.b.t;
   if (!S.history || S.historyKey !== t.id || newGame) {
     S.history = new Int32Array(2 * t.count * t.count);
     S.historyKey = t.id;
-  } else {
+    fresh = true;
+  }
+  S.count = t.count;
+  return fresh;
+}
+
+/** Per-search preparation: fresh killers, aged history, new TT generation. */
+function prepareTables(variantId, giveaway, newGame) {
+  const fresh = ensureTables(variantId, giveaway, newGame);
+  S.tt.newSearch();
+  if (!fresh) {
     const h = S.history;
     for (let i = 0; i < h.length; i++) h[i] >>= 2;
   }
-  S.count = t.count;
   S.killer1.fill(-1);
   S.killer2.fill(-1);
 }
@@ -525,22 +538,31 @@ function mateInfo(score) {
 }
 
 /**
- * Pick a move for the side to move.
- * @param {object} state engine State
- * @param {object} opts { level 1..5, timeMs, maxDepth, maxNodes, historyHashes, seed, newGame }
+ * Search core as a generator. With sliceMs > 0 it pauses (yields) whenever a time slice is used
+ * up and continues where it left off when resumed: an interrupted iteration is simply retried —
+ * the transposition table keeps the finished subtrees, so every retry gets further. The board
+ * and tables are shared module state, so they are re-attached after each pause (another search
+ * may have used them meanwhile). With sliceMs = 0 it never yields.
  */
-export function search(state, opts = {}) {
+function* searchSteps(state, opts, sliceMs) {
   const t0 = now();
   const level = clampLevel(opts.level === undefined ? 3 : opts.level);
-  const P = LEVEL_PARAMS[level];
+  // `params` (testing / tuning only) overrides individual level parameters
+  const P = opts.params && typeof opts.params === 'object' ? { ...LEVEL_PARAMS[level], ...opts.params } : LEVEL_PARAMS[level];
   const timeMs = Number.isFinite(opts.timeMs) && opts.timeMs > 0 ? opts.timeMs : P.timeMs;
   const maxDepth = Math.max(1, Math.min(60, Number.isFinite(opts.maxDepth) && opts.maxDepth > 0 ? opts.maxDepth | 0 : P.maxDepth));
+  const maxNodes = Number.isFinite(opts.maxNodes) && opts.maxNodes > 0 ? opts.maxNodes : Infinity;
   const rng = makeRng(opts.seed);
   const giveaway = !!(state.options && state.options.giveaway);
+  const hardDeadline = t0 + timeMs;
 
   const engineMoves = legalMoves(state);
+  let nodes = 0;
+  let selDepth = 0;
   const done = (r) => {
     const ms = now() - t0;
+    if (r.score === 0) r.score = 0; // no -0 from negation
+    if (r.scores) for (const x of r.scores) if (x.score === 0) x.score = 0;
     r.timeMs = Math.round(ms);
     r.nps = ms > 0 ? Math.round((r.nodes * 1000) / ms) : 0;
     r.level = level;
@@ -550,49 +572,82 @@ export function search(state, opts = {}) {
     return done({ path: null, score: giveaway ? MATE : -MATE, depth: 0, selDepth: 0, nodes: 0, mate: 0, pv: [], forced: false });
   }
 
-  S.b = boardFor(state.variantId, giveaway);
-  S.e = getEvalTables(state.variantId);
-  const b = S.b;
-  b.load(state);
-  b.setHistory(opts.historyHashes);
+  const evalSeed = (rng() * 4294967296) | 0;
+  const attach = () => {
+    S.b = boardFor(state.variantId, giveaway);
+    S.e = getEvalTables(state.variantId);
+    S.b.load(state);
+    S.b.setHistory(opts.historyHashes);
+    S.maxNodes = maxNodes;
+    S.jitter = P.jitter;
+    S.seed = evalSeed;
+    S.threatExt = P.threatExt;
+    S.lmr = P.lmr;
+  };
+  attach();
   prepareTables(state.variantId, giveaway, !!opts.newGame);
   S.nodes = 0;
   S.stop = false;
   S.selDepth = 0;
-  S.deadline = t0 + timeMs;
-  S.maxNodes = Number.isFinite(opts.maxNodes) && opts.maxNodes > 0 ? opts.maxNodes : Infinity;
-  S.jitter = P.jitter;
-  S.seed = (rng() * 4294967296) | 0;
-  S.threatExt = P.threatExt;
-  S.lmr = P.lmr;
+  S.deadline = hardDeadline;
 
   if (engineMoves.length === 1) {
     const score = staticEval();
     return done({ path: engineMoves[0].path.slice(), score, depth: 0, selDepth: 0, nodes: 0, mate: 0, pv: [], forced: true });
   }
 
-  const root = buildRoot(b, engineMoves);
-  const list = root.list;
+  const list = buildRoot(S.b, engineMoves).list;
   // initial order: captures by size, then the engine order
   list.forEach((r, k) => {
-    r.prev = rootOrderScore(b, r) * 64 - k;
+    r.prev = rootOrderScore(S.b, r) * 64 - k;
   });
   list.sort((x, y) => y.prev - x.prev);
   const ext = S.threatExt;
 
+  // the current slice ends at `sliceEnd` (reset only after a pause)
+  let sliceEnd = sliceMs > 0 ? now() + sliceMs : hardDeadline;
+  const beginSlice = () => {
+    S.stop = false;
+    S.deadline = Math.min(hardDeadline, sliceEnd);
+  };
+  const outOfTime = () => now() >= hardDeadline || S.nodes >= maxNodes;
+  const pause = () => {
+    nodes = S.nodes;
+    selDepth = Math.max(selDepth, S.selDepth);
+  };
+  const resume = () => {
+    sliceEnd = now() + sliceMs;
+    attach();
+    ensureTables(state.variantId, giveaway, false);
+    const fresh = buildRoot(S.b, engineMoves).list;
+    const idx = new Map(fresh.map((r) => [r.em, r.i]));
+    for (const r of list) r.i = idx.get(r.em);
+    S.nodes = nodes;
+    S.selDepth = 0;
+  };
+
   let best = list[0];
   let bestScore = 0;
   let completedDepth = 0;
-
   let rootScores = null;
+
   if (P.multiPV || opts.allScores) {
     let scores = null;
-    for (let d = 1; d <= maxDepth; d++) {
-      const s = rootMultiPV(list, d, ext);
-      if (!s) break;
-      scores = s;
-      completedDepth = d;
-      if (now() - t0 > timeMs * 0.45) break;
+    outer: for (let d = 1; d <= maxDepth; d++) {
+      for (;;) {
+        beginSlice();
+        const sc = rootMultiPV(list, d, ext);
+        if (sc) {
+          scores = sc;
+          completedDepth = d;
+          break;
+        }
+        if (outOfTime() || sliceMs <= 0) break outer;
+        pause();
+        yield;
+        resume();
+      }
+      if (now() - t0 > timeMs * 0.45 || S.nodes > maxNodes * 0.45) break;
     }
     if (!scores) scores = list.map(() => 0);
     let pick = 0;
@@ -614,35 +669,53 @@ export function search(state, opts = {}) {
       rootScores = list.map((r, k) => ({ path: r.em.path.slice(), score: scores[k] })).sort((x, y) => y.score - x.score);
     }
   } else {
-    for (let d = 1; d <= maxDepth; d++) {
+    outer: for (let d = 1; d <= maxDepth; d++) {
       S.selDepth = 0;
-      const it = rootIteration(list, d, ext);
-      if (!it.completed) {
-        if (it.best) {
-          best = it.best;
-          bestScore = it.score;
+      let it;
+      for (;;) {
+        beginSlice();
+        it = rootIteration(list, d, ext);
+        if (it.completed) break;
+        if (outOfTime() || sliceMs <= 0) {
+          if (it.best) {
+            best = it.best;
+            bestScore = it.score;
+          }
+          break outer;
         }
-        break;
+        pause();
+        yield;
+        resume();
       }
       best = it.best;
       bestScore = it.score;
       completedDepth = d;
+      selDepth = Math.max(selDepth, S.selDepth);
       // next iteration: best first, the others by this iteration's scores
       for (const r of list) r.prev = r === best ? INF : r.score;
       list.sort((x, y) => y.prev - x.prev);
       if (Math.abs(bestScore) > MATE_BOUND && d >= mateInfo(Math.abs(bestScore)) + 2) break;
-      if (now() - t0 > timeMs * 0.5) break;
+      // the next iteration would rarely finish in the remaining budget
+      if (now() - t0 > timeMs * 0.5 || S.nodes > maxNodes * 0.5) break;
     }
     // Promote when it costs nothing: an unstoppable promotion often scores the same now or
     // later (the horizon sees the king either way), but delaying it looks careless.
-    if (completedDepth >= 1 && !best.em.promotion && !S.stop) {
+    if (completedDepth >= 1 && !best.em.promotion && !outOfTime()) {
       const margin = 12;
       const bound = bestScore - margin;
       for (const r of list) {
         if (!r.em.promotion || r === best) continue;
-        b.make(r.i);
-        const sc = -negamax(completedDepth - 1, -bound, -(bound - 1), 1, ext);
-        b.unmake(r.i);
+        let sc;
+        for (;;) {
+          beginSlice();
+          S.b.make(r.i);
+          sc = -negamax(completedDepth - 1, -bound, -(bound - 1), 1, ext);
+          S.b.unmake(r.i);
+          if (!S.stop || outOfTime() || sliceMs <= 0) break;
+          pause();
+          yield;
+          resume();
+        }
         if (S.stop) break;
         if (sc >= bound) {
           best = r;
@@ -664,12 +737,65 @@ export function search(state, opts = {}) {
     path: best.em.path.slice(),
     score: bestScore,
     depth: completedDepth,
-    selDepth: S.selDepth,
+    selDepth: Math.max(selDepth, S.selDepth),
     nodes: S.nodes,
     mate: mateInfo(bestScore),
     pv,
     forced: false,
     ...(rootScores ? { scores: rootScores } : {}),
+  });
+}
+
+/**
+ * Pick a move for the side to move (synchronous; blocks for up to timeMs).
+ * @param {object} state engine State
+ * @param {object} opts { level 1..5, timeMs, maxDepth, maxNodes, historyHashes, seed, newGame, allScores }
+ */
+export function search(state, opts = {}) {
+  const it = searchSteps(state, opts, 0);
+  let r = it.next();
+  while (!r.done) r = it.next();
+  return r.value;
+}
+
+/**
+ * Time-sliced search for the main thread: runs in slices of `sliceMs` and yields to the event
+ * loop in between (setTimeout), so the UI stays responsive. Resolves the same result as
+ * search(), or null if `signal.cancelled` becomes true (checked between slices).
+ * @param {object} state engine State
+ * @param {object} opts same as search()
+ * @param {{ sliceMs?: number, signal?: { cancelled: boolean } }} [control]
+ */
+export function searchAsync(state, opts = {}, { sliceMs = 30, signal = null } = {}) {
+  return new Promise((resolve, reject) => {
+    let it;
+    try {
+      it = searchSteps(state, opts, Math.max(5, sliceMs));
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    const step = () => {
+      if (signal && signal.cancelled) {
+        try {
+          it.return();
+        } catch (err) {
+          /* ignore */
+        }
+        resolve(null);
+        return;
+      }
+      let r;
+      try {
+        r = it.next();
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      if (r.done) resolve(r.value);
+      else setTimeout(step, 0);
+    };
+    step();
   });
 }
 

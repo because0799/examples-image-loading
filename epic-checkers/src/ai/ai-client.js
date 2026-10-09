@@ -1,15 +1,16 @@
 // AIClient: runs the search in a Web Worker (started from the bundled __AI_WORKER_SRC__ via a
 // Blob URL) so the UI never blocks, with an automatic in-thread fallback when workers are not
-// available, fail to start, crash or stop answering. One request at a time: a new think()/hint()
-// supersedes the previous one (whose promise resolves null); stale worker answers are ignored
-// by request id. Every returned path is checked against the engine's legal moves.
+// available, fail to start, crash or stop answering (the fallback searches in short time slices
+// that yield to the event loop, so animations keep running). One request at a time: a new
+// think()/hint() supersedes the previous one (whose promise resolves null); stale worker answers
+// are ignored by request id. Every returned path is checked against the engine's legal moves.
 //
 //   const ai = new AIClient();
 //   const r = await ai.think(game.state, { level: 3, historyHashes: game.hashes });
 //   if (r) game.play(r.path);      // r === null when cancelled / superseded / disposed
 
 import { legalMoves, findMove, serializeState, deserializeState } from '../engine/index.js';
-import { search, resetSearch } from './search.js';
+import { searchAsync, resetSearch } from './search.js';
 import { AI_LEVELS, LEVEL_PARAMS, clampLevel } from './levels.js';
 
 export { AI_LEVELS };
@@ -28,13 +29,17 @@ function toEngineState(state) {
 
 export class AIClient {
   /**
-   * @param {{ useWorker?: boolean, inlineMaxMs?: number }} [options]
+   * @param {{ useWorker?: boolean, inlineMaxMs?: number, watchdogMs?: number, sliceMs?: number }} [options]
    *   useWorker   try a Web Worker first (default true); falls back to in-thread automatically
-   *   inlineMaxMs cap on the thinking time when searching on the main thread (default 2000)
+   *   inlineMaxMs cap on the thinking time when searching on the main thread (default 3000)
+   *   watchdogMs  extra grace period after timeMs before a silent worker is presumed dead (5000)
+   *   sliceMs     main-thread search slice between event-loop yields (default 24)
    */
-  constructor({ useWorker = true, inlineMaxMs = 2000 } = {}) {
+  constructor({ useWorker = true, inlineMaxMs = 3000, watchdogMs = WATCHDOG_EXTRA_MS, sliceMs = 24 } = {}) {
     this._wantWorker = !!useWorker;
-    this._inlineMaxMs = inlineMaxMs > 0 ? inlineMaxMs : 2000;
+    this._inlineMaxMs = inlineMaxMs > 0 ? inlineMaxMs : 3000;
+    this._sliceMs = sliceMs > 0 ? sliceMs : 24;
+    this._watchdogMs = watchdogMs > 0 ? watchdogMs : WATCHDOG_EXTRA_MS;
     this._worker = null;
     this._workerUrl = null;
     this._workerReady = false;
@@ -46,6 +51,8 @@ export class AIClient {
     this._disposed = false;
     /** Result of the last finished request (or null). */
     this.lastResult = null;
+    /** Why the worker was last abandoned (diagnostics), or null. */
+    this.lastError = null;
   }
 
   /** 'worker' when requests go to the Web Worker, 'inline' when they run in this thread. */
@@ -119,11 +126,15 @@ export class AIClient {
     this.cancel();
     const level = clampLevel(opts.level === undefined ? 3 : opts.level);
     const timeMs = Number.isFinite(opts.timeMs) && opts.timeMs > 0 ? opts.timeMs : LEVEL_PARAMS[level].timeMs;
+    // only positions since the last irreversible move can repeat
+    const quiet = engineState.counters && Number.isFinite(engineState.counters.quiet) ? engineState.counters.quiet : Infinity;
+    let history = Array.isArray(opts.historyHashes) ? opts.historyHashes.filter((h) => typeof h === 'string') : [];
+    if (Number.isFinite(quiet) && history.length > quiet + 2) history = history.slice(history.length - (quiet + 2));
     const payload = {
       level,
       timeMs,
       maxDepth: Number.isFinite(opts.maxDepth) ? opts.maxDepth : undefined,
-      historyHashes: Array.isArray(opts.historyHashes) ? opts.historyHashes.filter((h) => typeof h === 'string') : [],
+      historyHashes: history,
       seed: opts.seed,
       newGame: !!opts.newGame,
     };
@@ -173,7 +184,7 @@ export class AIClient {
     req.timer = setTimeout(() => {
       if (req.done || this._current !== req) return;
       this._onWorkerFailure(w, 'timeout');
-    }, req.payload.timeMs + WATCHDOG_EXTRA_MS);
+    }, req.payload.timeMs + this._watchdogMs);
   }
 
   _onWorkerMessage(w, msg) {
@@ -189,7 +200,11 @@ export class AIClient {
     if (!req || req.id !== msg.id) return; // stale answer of a superseded request
     if (msg.type === 'error') {
       this._failures++;
-      if (this._failures >= MAX_WORKER_FAILURES) this._workerBroken = true;
+      this.lastError = msg.message || 'worker error';
+      if (this._failures >= MAX_WORKER_FAILURES) {
+        this._workerBroken = true;
+        this._killWorker();
+      }
       this._runInline(req);
       return;
     }
@@ -245,17 +260,21 @@ export class AIClient {
       clearTimeout(req.timer);
       req.timer = null;
     }
-    // yield first so the UI can paint the "thinking" state before the synchronous search
+    // Time-sliced search on this thread: yields to the event loop every few ms so animations
+    // keep running, and stops between slices once the request is cancelled or superseded.
+    const signal = {
+      get cancelled() {
+        return req.done;
+      },
+    };
+    const payload = { ...req.payload, timeMs: Math.min(req.payload.timeMs, this._inlineMaxMs) };
     setTimeout(() => {
       if (req.done || this._current !== req) return;
-      let result;
-      try {
-        const payload = { ...req.payload, timeMs: Math.min(req.payload.timeMs, this._inlineMaxMs) };
-        result = search(req.state, payload);
-      } catch (err) {
-        result = this._emergencyMove(req.state, err);
-      }
-      this._finish(req, result);
+      searchAsync(req.state, payload, { sliceMs: this._sliceMs, signal })
+        .then((result) => {
+          if (result) this._finish(req, result);
+        })
+        .catch((err) => this._finish(req, this._emergencyMove(req.state, err)));
     }, 0);
   }
 

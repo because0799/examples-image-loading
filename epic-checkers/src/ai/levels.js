@@ -75,7 +75,7 @@ export const LEVEL_PARAMS = Object.freeze({
   2: Object.freeze({ timeMs: 220, maxDepth: 4, multiPV: true, noise: 45, blunder: 0.05, jitter: 0, threatExt: 1, lmr: false }),
   3: Object.freeze({ timeMs: 400, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 8, threatExt: 1, lmr: true }),
   4: Object.freeze({ timeMs: 1200, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 3, threatExt: 1, lmr: true }),
-  5: Object.freeze({ timeMs: 2500, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 0, threatExt: 2, lmr: true }),
+  5: Object.freeze({ timeMs: 2500, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 2, threatExt: 1, lmr: true }),
 });
 
 export function clampLevel(level) {

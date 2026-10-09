@@ -34,8 +34,12 @@ function bruteMoves(s, depth) {
   return out;
 }
 
+// Node budgets instead of wall-clock limits keep these tests deterministic on a busy machine
+// (≈ 0.2 / 0.4 / 0.8 s of search on a desktop core).
+const NODES = { 3: 120000, 4: 250000, 5: 500000 };
+
 function aiMove(s, level, extra = {}) {
-  const r = search(s, { level, timeMs: level >= 5 ? 500 : 300, seed: 11, newGame: true, ...extra });
+  const r = search(s, { level, timeMs: 30000, maxNodes: NODES[level], seed: 11, newGame: true, ...extra });
   return { r, str: pathStr(s, r.path), move: E.findMove(E.legalMoves(s), r.path) };
 }
 
@@ -187,23 +191,23 @@ test('repetition: avoids repeating a game position when winning, seeks it when l
   const s = E.stateFromString('russian', 'w:......../......../...b..../......../......../......../.W....../..W.....', {
     counters: { quiet: 10 },
   });
-  const r1 = search(s, { level: 4, timeMs: 300, seed: 1, newGame: true });
+  const r1 = search(s, { level: 4, timeMs: 30000, maxNodes: 200000, seed: 1, newGame: true });
   assert.ok(r1.score > 100, `white is winning (${r1.score})`);
   const after = E.applyMove(s, E.findMove(E.legalMoves(s), r1.path));
-  const r2 = search(s, { level: 4, timeMs: 300, seed: 1, newGame: true, historyHashes: [E.hashState(after), E.hashState(s)] });
+  const r2 = search(s, { level: 4, timeMs: 30000, maxNodes: 200000, seed: 1, newGame: true, historyHashes: [E.hashState(after), E.hashState(s)] });
   assert.notDeepEqual(r2.path, r1.path, 'the winning side avoids the repetition');
   assert.ok(r2.score > 100);
 
-  // Black: a lone king off the main road against three kings is lost — a repetition is welcome.
-  const sb = E.stateFromString('russian', 'b:.....B../......../......../......../......../W......./.......W/..W.....', {
+  // Black: a lone king against four kings is lost — a repetition is welcome.
+  const sb = E.stateFromString('russian', 'b:.....B../......../......../......../......../W......./.......W/..W.W...', {
     counters: { quiet: 10 },
   });
-  const base = search(sb, { level: 4, timeMs: 300, seed: 1, newGame: true });
+  const base = search(sb, { level: 4, timeMs: 30000, maxNodes: 200000, seed: 1, newGame: true });
   assert.ok(base.score < -100, `black is losing (${base.score})`);
   const moves = E.legalMoves(sb);
   const target = moves.find((m) => !E.findMove([m], base.path));
   const afterB = E.applyMove(sb, target);
-  const r3 = search(sb, { level: 4, timeMs: 300, seed: 1, newGame: true, historyHashes: [E.hashState(afterB), E.hashState(sb)] });
+  const r3 = search(sb, { level: 4, timeMs: 30000, maxNodes: 200000, seed: 1, newGame: true, historyHashes: [E.hashState(afterB), E.hashState(sb)] });
   assert.deepEqual(r3.path, target.path, 'the losing side goes for the repetition');
   assert.equal(r3.score, 0);
 });

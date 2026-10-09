@@ -1,7 +1,8 @@
 // AI demo / browser check: creates an AIClient (Web Worker by default, `?worker=0` forces the
 // in-thread fallback), runs think() on the start positions of three variants and on a mid-game
 // position, and prints every result into the page and the console. While each search runs, a
-// timer measures the longest main-thread stall — tiny with the worker, ~the search time inline.
+// timer measures the longest main-thread stall — tiny with the worker, about one time slice
+// (~25–30 ms) with the in-thread fallback.
 //
 //   node tools/build-web.mjs --demo ai-demo
 //   node tools/shot.mjs --path dev/ai-demo/index.html --wait 9000 --out /tmp/shots
@@ -125,23 +126,18 @@ async function run() {
     );
   }
 
-  // cancel(): the cancelled / superseded promise resolves null and the next request still works.
-  // In worker mode the search is also aborted mid-way (the worker is replaced); an in-thread
-  // search cannot be interrupted once it started, so there only an immediate cancel applies.
+  // cancel(): the cancelled / superseded promise resolves null and the next request still works;
+  // a running search is aborted (worker: replaced; in-thread: stops at the next time slice).
   const g = new E.Game('canadian');
   const p0 = ai.think(g.state, { level: 5, timeMs: 2500 });
   ai.cancel();
   const cancelledNow = await p0;
-  let cancelledLater = null;
-  let cancelMs = 0;
-  if (ai.mode === 'worker') {
-    const t0 = performance.now();
-    const p1 = ai.think(g.state, { level: 5, timeMs: 2500 });
-    await new Promise((r) => setTimeout(r, 150));
-    ai.cancel();
-    cancelledLater = await p1;
-    cancelMs = performance.now() - t0;
-  }
+  const t0 = performance.now();
+  const p1 = ai.think(g.state, { level: 5, timeMs: 2500 });
+  await new Promise((r) => setTimeout(r, 150));
+  ai.cancel();
+  const cancelledLater = await p1;
+  const cancelMs = performance.now() - t0;
   const pa = ai.think(g.state, { level: 4 });
   const superseding = ai.think(g.state, { level: 2 }); // supersedes `pa`
   const superseded = await pa;
@@ -150,7 +146,7 @@ async function run() {
     cancelledNow === null && cancelledLater === null && superseded === null && after && E.findMove(g.moves, after.path);
   allOk = allOk && !!cancelOk;
   log(
-    `cancel: immediate=${cancelledNow === null ? 'null' : 'NOT NULL'} mid-search=${ai.mode === 'worker' ? (cancelledLater === null ? `null after ${cancelMs.toFixed(0)} ms` : 'NOT NULL') : 'n/a (inline)'} superseded=${superseded === null ? 'null' : 'NOT NULL'} next=${after ? E.moveToString('canadian', E.findMove(g.moves, after.path)) : 'none'} ok=${!!cancelOk}`,
+    `cancel: immediate=${cancelledNow === null ? 'null' : 'NOT NULL'} mid-search=${cancelledLater === null ? `null after ${cancelMs.toFixed(0)} ms` : 'NOT NULL'} superseded=${superseded === null ? 'null' : 'NOT NULL'} next=${after ? E.moveToString('canadian', E.findMove(g.moves, after.path)) : 'none'} ok=${!!cancelOk}`,
   );
 
   const summary = `${allOk ? 'OK' : 'FAIL'} · mode=${ai.mode} · max UI stall ${maxStall.toFixed(0)} ms · cancel ${cancelOk ? 'ok' : 'FAIL'}`;

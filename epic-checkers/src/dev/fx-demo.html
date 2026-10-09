@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>fx-demo — EPIC ШАШКИ effects lab</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; color: #ede8ff; overflow: hidden;
+    font-family: Oswald, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
+  #stage { position: fixed; inset: 0; overflow: hidden; }
+  #board-slot { position: fixed; pointer-events: none; }
+  #panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; max-height: 36vh; display: flex; flex-direction: column;
+    background: linear-gradient(180deg, rgba(10,6,24,.86), rgba(5,3,12,.96)); border-top: 1px solid rgba(122,92,255,.45);
+    backdrop-filter: blur(6px); transition: transform .25s ease; }
+  #panel.collapsed { transform: translateY(calc(100% - 34px)); }
+  #panel header { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; flex: none;
+    font: 400 13px 'Russo One', sans-serif; letter-spacing: 1px; color: #ffd23f; }
+  #panel header .sp { flex: 1; }
+  #panel header button { padding: 4px 10px; font-size: 12px; }
+  #grid { overflow-y: auto; padding: 4px 10px 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 5px; }
+  #grid h3 { grid-column: 1 / -1; margin: 6px 0 0; font: 400 11px 'Russo One', sans-serif; color: #9a92b8; letter-spacing: 1.5px; text-transform: uppercase; }
+  button { font: 500 13px Oswald, sans-serif; color: #ede8ff; background: #1b1238; border: 1px solid #3a2a6e; border-radius: 7px;
+    padding: 8px 4px; cursor: pointer; touch-action: manipulation; }
+  button:active { transform: scale(.96); }
+  button.combo { border-color: #7a6020; background: linear-gradient(180deg, #33280a, #1e1706); color: #ffe9a0; }
+  button.on { background: #29e6ff; color: #000; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="board-slot"></div>
+<div id="panel"><header><span>EPIC FX LAB</span><span class="sp"></span><button id="mode">mode</button><button id="q">q</button><button id="clr">clear</button><button id="tog">▾</button></header><div id="grid"></div></div>
+<script src="app.js"></script>
+</body>
+</html>
