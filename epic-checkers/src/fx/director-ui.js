@@ -425,9 +425,12 @@ function versusNow(fx, o, P) {
   dim.position.set(-2, -2);
   dim.tint = 0x000000;
   dim.alpha = 0;
-  // split line through the centre, rising to the right
-  const yL = H * 0.5 + W * 0.2;
-  const yR = H * 0.5 - W * 0.2;
+  // split line through the board centre (the DOM HUD sits above / below the board), rising right
+  const fr = fx.renderer.frameBounds;
+  const cy0 = fr && fr.height > 0 ? fr.y + fr.height / 2 : H / 2;
+  const cy = Math.max(H * 0.36, Math.min(H * 0.64, cy0));
+  const yL = cy + W * 0.2;
+  const yR = cy - W * 0.2;
   const ang = Math.atan2(yR - yL, W);
   const pad = Math.max(W, H);
   const fighters = [
@@ -458,7 +461,7 @@ function versusNow(fx, o, P) {
     content.addChild(streaks);
     // big glow behind the portrait
     const px = F.dir < 0 ? W * 0.3 : W * 0.7;
-    const py = F.dir < 0 ? H * 0.5 - W * 0.62 : H * 0.5 + W * 0.62;
+    const py = F.dir < 0 ? cy - W * 0.5 : cy + W * 0.5;
     const glow = fx._sprite(T.frame('dot'), content);
     glow.blendMode = 'add';
     glow.tint = col;
@@ -524,7 +527,6 @@ function versusNow(fx, o, P) {
   // split line
   const split = new Graphics();
   const cx = W / 2;
-  const cy = H / 2;
   const half = Math.hypot(W, yL - yR) * 0.75;
   const ca = Math.cos(ang);
   const sa = Math.sin(ang);

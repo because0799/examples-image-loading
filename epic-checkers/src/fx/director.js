@@ -28,7 +28,7 @@
 import { wait, tween, animate, Ease } from '../render/tween.js';
 import { EPIC, CLASSIC } from '../render/palette.js';
 import { mixHex } from '../render/canvas.js';
-import { bragLine, attackName, kanjiFor } from './brag.js';
+import { bragLine, attackName, kanjiFor, allKanji } from './brag.js';
 import { caption, turnBanner, versus, hintComet, godrays, pulse } from './director-ui.js';
 import { Marks } from './director-marks.js';
 
@@ -173,7 +173,20 @@ export class Director {
   setMode(mode) {
     this.mode = mode === 'epic' ? 'epic' : 'classic';
     if (this.fx && this.fx.setMode) this.fx.setMode(this.mode);
+    if (this.mode === 'epic') this._preload();
     this.syncAuras();
+  }
+
+  /** Load the anime fonts / glyphs the Director uses once, so the first 覚醒 or 何?! never hitches. */
+  _preload() {
+    if (this._preloaded || !this.fx || typeof this.fx.preload !== 'function') return;
+    this._preloaded = true;
+    const texts = allKanji().concat(['ТВОЙ ХОД', "OPPONENT'S TURN", 'ПРОБУЖДЕНИЕ', 'УРОВЕНЬ СИЛЫ: 0123456789+', 'КОМБО']);
+    try {
+      Promise.resolve(this.fx.preload(texts)).catch(() => {});
+    } catch (e) {
+      /* fonts are a nicety */
+    }
   }
 
   setLang(lang) {
@@ -1224,7 +1237,9 @@ export class Director {
         onClash: () => {
           clashResolve();
           if (this._skipping) return;
-          this._track(fx.kanji(kanjiFor('start'), scr.width / 2, scr.height / 2, { screen: true, color: EPIC.gold, size: Math.min(150, scr.width * 0.36), duration: this._t(1050), realtime: true, exit: 'shatter' }));
+          const fb = r.frameBounds;
+          const ky = fb.height > 0 ? Math.max(scr.height * 0.36, Math.min(scr.height * 0.64, fb.y + fb.height / 2)) : scr.height / 2;
+          this._track(fx.kanji(kanjiFor('start'), scr.width / 2, ky, { screen: true, color: EPIC.gold, size: Math.min(150, scr.width * 0.36), duration: this._t(1050), realtime: true, exit: 'shatter' }));
           fx.flash(0xffffff, { duration: 200, alpha: 0.65 });
           fx.shake(0.5, 420);
           this._sfx('gong', { intensity: 1 });
