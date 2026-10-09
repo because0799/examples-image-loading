@@ -1,0 +1,27 @@
+{
+  "name": "epic-checkers",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Checkers / draughts for Android (Russian, Turkish, International, English, ...) with EPIC BADASS MODE",
+  "scripts": {
+    "build:web": "node tools/build-web.mjs",
+    "build:apk": "bash tools/build-apk.sh",
+    "build": "npm run build:web && npm run build:apk",
+    "test": "node --test tests/",
+    "serve": "node tools/serve.mjs"
+  },
+  "dependencies": {
+    "@fontsource/dela-gothic-one": "5.3.0",
+    "@fontsource/oswald": "5.3.0",
+    "@fontsource/rubik-mono-one": "5.3.0",
+    "@fontsource/russo-one": "5.3.0",
+    "@fontsource/unbounded": "5.3.0",
+    "pixi-filters": "6.1.5",
+    "pixi.js": "8.22.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright": "1.56.1"
+  }
+}
