@@ -938,10 +938,11 @@ export class FxTextures {
       e = { tex, refs: 0, used: 0, px: t.canvas.width * t.canvas.height };
       this._text.set(key, e);
       this._textPx += e.px;
-      this._evictText();
     }
+    // claim before evicting so the entry being returned can never be the one evicted
     e.refs++;
     e.used = ++this._textClock;
+    this._evictText();
     return e.tex;
   }
 

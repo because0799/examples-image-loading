@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>director-demo — EPIC ШАШКИ choreography</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; color: #ede8ff; overflow: hidden;
+    font-family: Oswald, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
+  #stage { position: fixed; inset: 0; overflow: hidden; }
+  #board-slot { position: fixed; pointer-events: none; }
+  /* stand-ins for the game HUD panels (to judge overlaps) */
+  .hud { position: fixed; left: 8px; right: 8px; pointer-events: none; z-index: 5; border-radius: 14px;
+    border: 1px solid rgba(255,255,255,.10); background: rgba(8,6,18,.35); }
+  .hud.top { top: 8px; }
+  .hud.bottom { bottom: 8px; }
+  #label { position: fixed; left: 10px; bottom: 10px; z-index: 6; font: 500 12px Oswald, sans-serif; color: #9a92b8;
+    letter-spacing: 1px; pointer-events: none; text-shadow: 0 1px 2px #000; }
+  #controls { position: fixed; right: 8px; bottom: 8px; z-index: 7; display: flex; flex-wrap: wrap; gap: 4px; max-width: 70vw; justify-content: flex-end; }
+  #controls button { font: 500 12px Oswald, sans-serif; color: #ede8ff; background: #1b1238; border: 1px solid #3a2a6e;
+    border-radius: 6px; padding: 6px 8px; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="board-slot"></div>
+<div class="hud top" id="hud-top"></div>
+<div class="hud bottom" id="hud-bottom"></div>
+<div id="label"></div>
+<div id="controls"></div>
+<script src="app.js"></script>
+</body>
+</html>

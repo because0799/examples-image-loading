@@ -1047,7 +1047,7 @@ export class FX {
       s.alpha = 0;
     }
     b.tint = mixHex(color, 0xffffff, 0.5);
-    const peak = (o.alpha != null ? o.alpha : this.epic ? 0.8 : 0.4);
+    const peak = o.alpha != null ? o.alpha : this.epic ? 0.8 : 0.28;
     return this._run({
       duration: dur,
       realtime: !!o.realtime,

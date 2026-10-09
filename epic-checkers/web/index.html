@@ -4,20 +4,43 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#05030C">
+  <meta name="color-scheme" content="dark">
+  <meta name="format-detection" content="telephone=no">
   <title>EPIC ШАШКИ</title>
+  <link rel="icon" type="image/png" href="icon-512.png">
   <link rel="stylesheet" href="fonts.css">
   <link rel="stylesheet" href="app.css">
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #05030C;
-      -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; touch-action: none; overscroll-behavior: none; }
+      -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; touch-action: none;
+      overscroll-behavior: none; -webkit-touch-callout: none; }
     #stage, #ui { position: fixed; inset: 0; }
     #stage { z-index: 0; }
     #ui { z-index: 10; pointer-events: none; }
+    /* boot splash (removed by main.js once the first screen is up) */
+    #boot { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 22px; background: radial-gradient(120% 70% at 50% 35%, #1b0f3a 0%, #05030C 70%);
+      color: #fff; font-family: "Russo One", "Dela Gothic One", system-ui, sans-serif; transition: opacity .5s ease; }
+    #boot.is-done { opacity: 0; pointer-events: none; }
+    .boot__logo { font-size: 44px; letter-spacing: .04em; line-height: 1; text-align: center;
+      text-shadow: 0 0 18px rgba(41,230,255,.55), 0 0 42px rgba(255,46,99,.35); }
+    .boot__logo b { display: block; font-size: .46em; letter-spacing: .5em; color: #29E6FF; margin-bottom: 6px; }
+    .boot__bar { width: 132px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.12); overflow: hidden; }
+    .boot__bar i { display: block; width: 40%; height: 100%; background: linear-gradient(90deg, #29E6FF, #FF2E63);
+      animation: boot-run 1s cubic-bezier(.6,0,.4,1) infinite; }
+    .boot__msg { max-width: 280px; text-align: center; font: 15px/1.4 system-ui, sans-serif; color: #ffb3c4; }
+    #boot.is-error .boot__bar { display: none; }
+    @keyframes boot-run { from { transform: translateX(-100%); } to { transform: translateX(330%); } }
   </style>
 </head>
 <body>
   <div id="stage"></div>
   <div id="ui"></div>
+  <div id="boot" aria-hidden="true">
+    <div class="boot__logo"><b>EPIC</b>ШАШКИ</div>
+    <div class="boot__bar"><i></i></div>
+    <div class="boot__msg"></div>
+  </div>
   <script src="app.js"></script>
 </body>
 </html>

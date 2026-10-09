@@ -2,7 +2,7 @@
 // impactFrame, speedLines, kanji (onomatopoeia), banner, cutIn, comboCounter, menacing, plus the
 // lettering styles and font loading they share.
 
-import { Container, Sprite, Graphics, Texture, TilingSprite, MeshSimple, Rectangle } from 'pixi.js';
+import { Graphics, Texture, TilingSprite, MeshSimple, Rectangle } from 'pixi.js';
 import { Ease } from '../render/tween.js';
 import { mixHex, shadeHex } from '../render/canvas.js';
 import { EPIC, CLASSIC } from '../render/palette.js';
@@ -392,8 +392,9 @@ export function impactFrame(fx, o = {}) {
       h.mode = mode;
       h.amount = o.threshold != null ? o.threshold : 0.3;
     } else {
+      // no colour-matrix filter: near-opaque paper / ink frames that still let the scene ghost through
       bg.tint = mode === 1 ? 0xffffff : 0x000000;
-      bg.alpha = mode === 1 ? 1 : 0.85;
+      bg.alpha = mode === 1 ? 0.84 : 0.72;
     }
     layout(mode);
   };

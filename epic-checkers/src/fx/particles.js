@@ -607,7 +607,7 @@ export const BURSTS = {
 
   petals(ps, L, x, y, o, env) {
     const { sq, T } = env;
-    const n = Math.max(3, Math.round((o.count != null ? o.count : 24) * env.mul));
+    const n = Math.max(3, Math.round((o.count != null ? o.count : 30) * env.mul));
     const tint = o.color != null ? o.color : 0xffffff;
     for (let i = 0; i < n; i++) {
       const p = ps.spawn(L.normal, T.frame('petal'));
@@ -627,7 +627,7 @@ export const BURSTS = {
       p.vr = rand(-3, 3);
       p.rotation = Math.random() * TAU;
       p.life = rand(1.8, 3.2) * (o.life || 1);
-      p.s0 = p.s1 = (rand(0.22, 0.36) * sq * (o.size || 1)) / 28;
+      p.s0 = p.s1 = (rand(0.32, 0.5) * sq * (o.size || 1)) / 28;
       p.fin = 0.04;
       p.fout = 0.75;
       p.colors(tint);
@@ -656,7 +656,7 @@ export const BURSTS = {
       p.vr = rand(-8, 8);
       p.rotation = Math.random() * TAU;
       p.life = rand(1.4, 2.5) * (o.life || 1);
-      p.s0 = p.s1 = (rand(0.2, 0.3) * sq * (o.size || 1)) / 12;
+      p.s0 = p.s1 = (rand(0.28, 0.42) * sq * (o.size || 1)) / 12;
       p.sy = rand(0.7, 1.1);
       p.fout = 0.8;
       p.colors(o.color != null ? o.color : pick(CONFETTI));
