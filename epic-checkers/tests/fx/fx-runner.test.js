@@ -134,3 +134,42 @@ test('classic mode turns epic-only punctuation into no-ops', async () => {
   assert.equal(await fx.menacing(0, 0), true);
   assert.equal(fx.stats().nodes, 0);
 });
+
+test('full-screen punctuation waits for a running impact frame and a third heavy filter is halved (EAD-04)', () => {
+  const { fx, r, step } = setup();
+  fx.impactFrame({ duration: 100 });
+  const f = fx.flash(0xffffff, { duration: 200, alpha: 0.5 });
+  assert.ok(f.effect.delay >= 90, `the flash starts after the impact frame (delay ${f.effect.delay})`);
+  const forced = fx.flash(0xffffff, { duration: 100, force: true });
+  assert.equal(forced.effect.delay, 0);
+  step(16, 10);
+  assert.equal(fx._screenGate('rgb').delay, 0, 'gate open once the impact frame is over');
+  fx._heavy.zoom = 1;
+  fx._heavy.bloom = 1;
+  assert.equal(fx._screenGate('rgb').k, 0.5);
+  assert.equal(fx._screenGate('bloom').k, 1, 'its own kind does not count');
+  fx.clear();
+  assert.deepEqual(fx._heavy, { rgb: 0, zoom: 0, bloom: 0 });
+  assert.equal(fx._impactUntil, 0);
+  void r;
+});
+
+test('a throwing effect / stage never stops the FX frame (F2)', () => {
+  const { fx, step } = setup();
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    fx._run({ duration: 100, start: () => {
+      throw new Error('start');
+    } });
+    const ok = fx.shockwave(10, 10, { duration: 100 });
+    fx.particles.update = () => {
+      throw new Error('particles');
+    };
+    step(16, 10);
+    assert.equal(fx.stats().effects, 0, 'everything still ran to the end');
+    void ok;
+  } finally {
+    console.error = orig;
+  }
+});

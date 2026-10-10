@@ -66,7 +66,25 @@ test('settings round-trip and validation', () => {
   assert.equal(back.sfxVolume, 0.3);
   assert.equal(back.quality, 'low');
   assert.equal(back.animSpeed, 1.5);
-  assert.deepEqual(back.lastConfig, s.lastConfig);
+  // demo fighter levels default to the single level of older saved configs
+  assert.deepEqual(back.lastConfig, { ...s.lastConfig, levelWhite: 5, levelBlack: 5 });
+});
+
+test('demo fighter levels (levelWhite / levelBlack) round-trip and are validated', () => {
+  const st = new MemoryStorage();
+  const s = loadSettings(st);
+  assert.equal(s.lastConfig.levelWhite, 3);
+  assert.equal(s.lastConfig.levelBlack, 3);
+  s.lastConfig = { ...s.lastConfig, mode: 'demo', level: 2, levelWhite: 1, levelBlack: 5 };
+  saveSettings(s, st);
+  const back = loadSettings(st);
+  assert.equal(back.lastConfig.levelWhite, 1);
+  assert.equal(back.lastConfig.levelBlack, 5);
+  assert.equal(back.lastConfig.level, 2);
+  st.setItem(SETTINGS_KEY, JSON.stringify({ lastConfig: { level: 4, levelWhite: 9, levelBlack: 'x' } }));
+  const bad = loadSettings(st);
+  assert.equal(bad.lastConfig.levelWhite, 4);
+  assert.equal(bad.lastConfig.levelBlack, 4);
 });
 
 test('corrupt or hostile settings fall back field by field', () => {
@@ -106,22 +124,34 @@ test('StatsStore records wins/losses/draws per variant and persists', () => {
   assert.equal(d.streak, 0);
 });
 
-test('first win unlocks First Blood and reports records', () => {
+test('first win unlocks First Blood; records are reported only when an earlier one is beaten', () => {
   const s = new StatsStore({ storage: new MemoryStorage() });
   const r = s.record(game({ maxCombo: 3, kingsMade: 2 }));
   const ids = r.newTitles.map((x) => x.id);
   assert.ok(ids.includes('first-blood'));
   assert.ok(ids.includes('triple'));
-  const recIds = r.newRecords.map((x) => x.id);
-  assert.ok(recIds.includes('bestCombo'));
-  assert.ok(recIds.includes('mostCaptures'));
-  assert.ok(recIds.includes('mostKings'));
-  assert.ok(recIds.includes('fastestWin'));
-  // same game again: no new titles, no new records except none
+  // MUX-15: the very first game only sets the baselines (no «НОВЫЙ РЕКОРД» on game one)
+  assert.deepEqual(r.newRecords, []);
+  // same game again: no new titles, no records except the 2-win streak
   const r2 = s.record(game({ maxCombo: 3, kingsMade: 2 }));
   assert.equal(r2.newTitles.length, 0);
   assert.ok(!r2.newRecords.some((x) => x.id === 'bestCombo'));
   assert.ok(r2.newRecords.some((x) => x.id === 'bestStreak' && x.value === 2));
+  // a better game beats every baseline
+  const base = s.get().best;
+  const r3 = s.record(game({ maxCombo: 4, kingsMade: 3, captures: base.captures + 2, moves: base.fastestWin - 5 }));
+  const recIds = r3.newRecords.map((x) => x.id);
+  for (const id of ['bestCombo', 'mostCaptures', 'mostKings', 'fastestWin', 'bestStreak']) assert.ok(recIds.includes(id), id);
+  const combo = r3.newRecords.find((x) => x.id === 'bestCombo');
+  assert.deepEqual([combo.value, combo.prev], [4, 3]);
+});
+
+test('records on a loss are stored (shown later) but a first loss reports none', () => {
+  const s = new StatsStore({ storage: new MemoryStorage() });
+  const r = s.record(game({ result: 'loss', maxCombo: 2, captures: 5 }));
+  assert.deepEqual(r.newRecords, []);
+  assert.equal(s.get().best.captures, 5);
+  assert.equal(s.get().best.combo, 2);
 });
 
 test('flawless, combo, level 5 and giveaway titles', () => {

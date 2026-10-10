@@ -1,7 +1,9 @@
 // Director overlays — screen-space pieces of choreography that are not generic FX primitives:
-//   caption(fx, opts)     anime subtitle caption (speaker tag + line) anchored to the board edge
+//   caption(fx, opts)     manga speech bubble (speaker tag + line) in the speaker's lane / board edge
 //   turnBanner(fx, opts)  small slash banner «ТВОЙ ХОД» on the side of the player to move (epic)
-//   versus(fx, opts)      VS screen: diagonal split, both fighters, power levels, 対決
+//   versus(fx, opts)      VS screen: diagonal split, both fighters (kanji portraits), power levels, 対決
+//   shorten(p, ms)        make a running caption / banner exit within `ms` (the lane is needed)
+//   overlayHeight(...)    expected height of a caption / banner (lane planning)
 //   hintComet(fx, path)   glowing comet tracing a hinted move along the board (world space)
 //   godrays(fx, opts)     sky god-rays on the background for a while (high quality only)
 //   ensureFonts(list)     load fonts before building lettering (bounded wait)
@@ -13,7 +15,7 @@ import { Container, Graphics, Sprite, Texture, TilingSprite, Text } from 'pixi.j
 import { Ease } from '../render/tween.js';
 import { mixHex, shadeHex } from '../render/canvas.js';
 import { EPIC, CLASSIC } from '../render/palette.js';
-import { titleStyle, subStyle } from './anime.js';
+import { titleStyle, subStyle, kanjiStyle } from './anime.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -51,6 +53,24 @@ export function ensureFonts(specs, text = '', timeoutMs = 900) {
   return Promise.race([all, new Promise((r) => setTimeout(r, timeoutMs))]);
 }
 
+/**
+ * Let a running overlay finish early: its exit animation starts now and lasts ≤ `ms`. Works for
+ * caption / turnBanner promises (also before their fonts loaded: then it just stops them).
+ */
+export function shorten(p, ms = 200) {
+  if (!p) return false;
+  const e = p.effect || (p.inner && p.inner.effect);
+  if (!e) {
+    if (typeof p.stop === 'function') p.stop();
+    return true;
+  }
+  if (e.done) return false;
+  const until = (e.t || 0) + Math.max(1, ms);
+  if (!(e.duration > 0) || e.duration > until) e.duration = until;
+  if (typeof e.onShorten === 'function') e.onShorten();
+  return true;
+}
+
 /** Run fn once fonts are there; returns a promise with .stop() that also cancels a pending start. */
 function afterFonts(fx, specs, text, fn) {
   const F = typeof document !== 'undefined' && document.fonts ? document.fonts : null;
@@ -71,6 +91,7 @@ function afterFonts(fx, specs, text, fn) {
   const p = ensureFonts(specs, text).then(() => {
     if (stopped || gen !== fx._gen) return false;
     inner = fn();
+    p.inner = inner;
     return inner;
   });
   p.stop = () => {
@@ -168,16 +189,41 @@ function para(g, w, h, slant, color, alpha) {
 }
 
 // ================================================================================ caption
+/** Caption font size for a screen width (bigger than a subtitle: a character is talking, EAD-21). */
+export function captionSize(W) {
+  return Math.round(clamp(W * 0.058, 18, 26));
+}
+
+/** Banner font size for a screen width. */
+export function bannerSize(W) {
+  return Math.round(clamp(W * 0.052, 16, 26));
+}
+
 /**
- * Anime subtitle caption: dark slanted plate with the line, a coloured speaker tag, anchored to the
- * board edge of the speaker ('top' | 'bottom'). opts: { text, speaker, color, side, duration, epic }.
+ * Expected height (px) of an overlay: kind 'banner' | 'caption' (lines = 1 | 2). Used by the
+ * Director's lane planner before the overlay exists.
+ */
+export function overlayHeight(fx, kind, lines = 2) {
+  const scr = fx && fx.renderer && fx.renderer.screen;
+  const W = scr && scr.width > 0 ? scr.width : 390;
+  if (kind === 'banner') return bannerSize(W) * 1.7 + 8;
+  const size = captionSize(W);
+  return size * 1.18 * lines + size * 0.75 + size * 0.62 * 1.55 * 0.85 + Math.max(7, size * 0.42) + 4;
+}
+
+/**
+ * Manga speech bubble: dark slanted plate with the line, a coloured speaker tag and a tail that
+ * points toward the speaker's HUD panel ('top' | 'bottom'), slightly tilted.
+ * opts: { text, speaker, color, side, duration, epic, y (centre, screen px; default: the board
+ * edge of the speaker), maxH (scale down to fit a lane) }.
  */
 export function caption(fx, o = {}) {
   if (!o.text || !usable(fx)) return done();
   const epic = o.epic != null ? !!o.epic : fx.epic;
   const scr = fx.renderer.screen;
   const W = scr.width;
-  const size = Math.round(clamp(W * 0.046, 15, 23));
+  // compact: no free lane (small phones) — the bubble straddles the board edge, so keep it small
+  const size = Math.round(captionSize(W) * (o.compact ? 0.8 : 1));
   const color = o.color != null ? o.color : epic ? EPIC.gold : CLASSIC.gold;
   const st = captionStyle(fx, size, color, epic);
   const tg = tagStyle(fx, Math.round(size * 0.62), color, epic);
@@ -191,19 +237,18 @@ function captionNow(fx, o, P) {
   const W = scr.width;
   const H = scr.height;
   const fr = fx.renderer.frameBounds;
-  const dur = o.duration || 1900;
-  const e = { cleanup: [], realtime: o.realtime !== false, duration: dur };
+  const e = { cleanup: [], realtime: o.realtime !== false, duration: o.duration || 2100 };
   const root = fx._box(fx.c.screenUI, 'director-caption');
-  const maxW = Math.min(W - 28, 470);
+  const maxW = Math.min(W - (o.compact ? 16 : 28), 470);
   // lines (wrap to 2 when needed)
   let lines = [o.text];
   let sprites = lines.map((l) => fx._textSprite(l, st, null, e));
-  let tw = Math.max(...sprites.map((s) => s.texture.fx.textWidth));
+  let tw = Math.max(...sprites.map((sp) => sp.texture.fx.textWidth));
   if (tw > maxW - size * 1.6 && o.text.includes(' ')) {
-    for (const s of sprites) fx._free(s);
+    for (const sp of sprites) fx._free(sp);
     lines = splitLine(o.text);
     sprites = lines.map((l) => fx._textSprite(l, st, null, e));
-    tw = Math.max(...sprites.map((s) => s.texture.fx.textWidth));
+    tw = Math.max(...sprites.map((sp) => sp.texture.fx.textWidth));
   }
   const tScale = Math.min(1, (maxW - size * 1.6) / tw);
   const lineH = size * 1.18 * tScale;
@@ -212,19 +257,34 @@ function captionNow(fx, o, P) {
   const slant = ph * 0.22;
   const side = o.side === 'top' ? 'top' : 'bottom';
   const sgn = side === 'bottom' ? 1 : -1; // bottom: enters from the left; top: from the right
-  // anchor to the board edge (half over the frame), clamped to the screen
+  const toward = side === 'bottom' ? 1 : -1; // the tail points toward the speaker's HUD panel
+  const tagH = o.speaker ? tg.size * 1.55 : 0;
+  const tailH = epic ? Math.max(7, size * 0.42) : 0;
+  const fullH = ph + tagH * 0.85 + tailH + 4;
+  const k = o.maxH > 0 ? Math.min(1, o.maxH / fullH) : 1;
   let y;
-  if (fr.height > 0) y = side === 'bottom' ? fr.y + fr.height + ph * 0.5 + 6 : fr.y - ph * 0.5 - 10;
+  if (o.y != null) y = o.y;
+  else if (fr.height > 0 && o.compact) y = side === 'bottom' ? fr.y + fr.height - fullH * 0.3 : fr.y + fullH * 0.3;
+  else if (fr.height > 0) y = side === 'bottom' ? fr.y + fr.height + ph * 0.5 + 6 : fr.y - ph * 0.5 - 10;
   else y = side === 'bottom' ? H * 0.78 : H * 0.22;
-  y = clamp(y, ph / 2 + 6, H - ph / 2 - 6);
+  y = clamp(y, (fullH * k) / 2 + 4, H - (fullH * k) / 2 - 4);
   root.position.set(W / 2, y);
+  root.scale.set(k);
+  root.rotation = epic ? (side === 'bottom' ? -0.07 : 0.07) : 0;
 
   const body = fx._box(root, 'caption-body');
+  // the plate sits a bit away from the tail so the whole bubble stays centred on y
+  body.y = (-toward * (tailH - tagH * 0.85)) / 2;
   const plate = new Graphics();
   body.addChild(plate);
+  const tailX = -pw / 2 + Math.min(pw * 0.2, size * 2.4);
   if (epic) {
-    para(plate, pw + 6, ph + 6, slant, color, 0.55); // coloured rim
-    para(plate, pw, ph, slant, 0x06040c, 0.9);
+    para(plate, pw + 6, ph + 6, slant, color, 0.6); // coloured rim
+    // tail toward the HUD (rim, then body)
+    const ty0 = toward * (ph / 2);
+    plate.poly([tailX - size * 0.55, ty0, tailX + size * 0.25, ty0, tailX - size * 0.75, ty0 + toward * (tailH + 3)], true).fill({ color, alpha: 0.6 });
+    para(plate, pw, ph, slant, 0x06040c, 0.93);
+    plate.poly([tailX - size * 0.42, ty0 - toward * 1, tailX + size * 0.14, ty0 - toward * 1, tailX - size * 0.68, ty0 + toward * tailH], true).fill({ color: 0x06040c, alpha: 0.93 });
     // inner gradient sheen
     const sheen = new Graphics();
     para(sheen, pw, ph * 0.45, slant * 0.45, mixHex(color, 0x000000, 0.55), 0.35);
@@ -250,18 +310,18 @@ function captionNow(fx, o, P) {
     body.addChild(flash);
   }
   const textBox = fx._box(body, 'caption-text');
-  sprites.forEach((s, i) => {
-    textBox.addChild(s);
-    s.scale.set(tScale);
-    s.position.set(sgn * size * 0.25, (i - (lines.length - 1) / 2) * lineH + size * 0.04);
+  sprites.forEach((sp, i) => {
+    textBox.addChild(sp);
+    sp.scale.set(tScale);
+    sp.position.set(sgn * size * 0.25, (i - (lines.length - 1) / 2) * lineH + size * 0.04);
   });
-  // speaker tag
+  // speaker tag on the edge facing away from the tail
   let tag = null;
   if (o.speaker) {
-    tag = fx._box(root, 'caption-tag');
+    tag = fx._box(body, 'caption-tag');
     const ts = fx._textSprite(o.speaker.toUpperCase(), tg, null, e);
     const tw2 = ts.texture.fx.textWidth;
-    const th = tg.size * 1.55;
+    const th = tagH;
     const tgW = tw2 + tg.size * 1.6;
     const g = new Graphics();
     if (epic) para(g, tgW, th, th * 0.25, color, 1);
@@ -270,12 +330,13 @@ function captionNow(fx, o, P) {
       g.rect(-tgW / 2, th / 2 - 1.5, tgW, 1.5).fill({ color: CLASSIC.gold, alpha: 1 });
     }
     tag.addChild(g, ts);
-    tag.position.set(sgn * (-pw / 2 + tgW / 2 + size * 0.3), -ph / 2 - th * 0.35);
+    tag.position.set(sgn * (-pw / 2 + tgW / 2 + size * 0.3), -toward * (ph / 2 + th * 0.35));
     tag._w = tgW;
   }
   const inMs = epic ? 200 : 260;
   const outMs = 220;
   e.update = (dt, t) => {
+    const dur = e.duration;
     const kin = clamp01(t / inMs);
     const ke = t > dur - outMs ? clamp01((t - (dur - outMs)) / outMs) : 0;
     if (epic) {
@@ -297,15 +358,20 @@ function captionNow(fx, o, P) {
     }
   };
   e.end = () => fx._dispose(root);
-  return fx._run(e);
+  const p = fx._run(e);
+  p.height = fullH * k;
+  return p;
 }
 
 // ================================================================================ turn banner
-/** Small slash banner for the side to move (epic). opts: { text, color, side: 'top'|'bottom', duration }. */
+/**
+ * Small slash banner for the side to move (epic). opts: { text, color, side: 'top'|'bottom',
+ * duration, y (centre, screen px; default: the board edge of that side), maxH }.
+ */
 export function turnBanner(fx, o = {}) {
   if (!usable(fx) || !fx.epic || !o.text) return done();
   const scr = fx.renderer.screen;
-  const size = Math.round(clamp(scr.width * 0.052, 16, 26));
+  const size = bannerSize(scr.width);
   const color = o.color != null ? o.color : EPIC.white;
   const st = turnStyle(fx, size, color);
   return afterFonts(fx, [`${size}px "Dela Gothic One"`], o.text, () => turnNow(fx, o, { size, color, st }));
@@ -317,14 +383,15 @@ function turnNow(fx, o, P) {
   const W = scr.width;
   const H = scr.height;
   const fr = fx.renderer.frameBounds;
-  const dur = o.duration || 1050;
-  const e = { cleanup: [], realtime: o.realtime !== false, duration: dur };
+  const e = { cleanup: [], realtime: o.realtime !== false, duration: o.duration || 1050 };
   const side = o.side === 'top' ? 'top' : 'bottom';
   const root = fx._box(fx.c.screenUI, 'director-turn');
   const ph = size * 1.7;
-  let y = fr.height > 0 ? (side === 'bottom' ? fr.y + fr.height : fr.y) : side === 'bottom' ? H * 0.8 : H * 0.2;
-  y = clamp(y, ph / 2 + 4, H - ph / 2 - 4);
+  const k = o.maxH > 0 ? Math.min(1, o.maxH / (ph + 8)) : 1;
+  let y = o.y != null ? o.y : fr.height > 0 ? (side === 'bottom' ? fr.y + fr.height : fr.y) : side === 'bottom' ? H * 0.8 : H * 0.2;
+  y = clamp(y, (ph * k) / 2 + 4, H - (ph * k) / 2 - 4);
   root.position.set(W / 2, y);
+  root.scale.set(k);
   root.rotation = side === 'bottom' ? -0.035 : 0.035;
   const text = fx._textSprite(o.text, st, null, e);
   const tw = text.texture.fx.textWidth;
@@ -338,7 +405,7 @@ function turnNow(fx, o, P) {
   const coreL = fx._sprite(Texture.WHITE, line);
   coreL.anchor.set(0, 0.5);
   coreL.blendMode = 'add';
-  const L = W * 1.25;
+  const L = (W * 1.25) / k;
   glowL.width = L;
   glowL.height = 7;
   glowL.alpha = 0.5;
@@ -366,6 +433,7 @@ function turnNow(fx, o, P) {
   flare.tint = mixHex(color, 0xffffff, 0.5);
   flare.alpha = 0;
   e.update = (dt, t) => {
+    const dur = e.duration;
     const lk = clamp01(t / 160);
     line.scale.x = Ease.outCubic(lk);
     const outStart = dur - 200;
@@ -380,16 +448,19 @@ function turnNow(fx, o, P) {
     text.alpha = clamp01((t - 110) / 120);
     const fk = clamp01((t - 60) / 260);
     flare.alpha = fk > 0 && fk < 1 ? Math.sin(Math.PI * fk) * 0.9 : 0;
-    flare.scale.set((W * 1.3) / 128, (ph * 0.55) / 24);
+    flare.scale.set((W * 1.3) / k / 128, (ph * 0.55) / 24);
   };
   e.end = () => fx._dispose(root);
-  return fx._run(e);
+  const p = fx._run(e);
+  p.height = (ph + 8) * k;
+  return p;
 }
 
 // ================================================================================ versus
 /**
  * VS screen. opts: { top: fighter, bottom: fighter, label (power label, e.g. 'УРОВЕНЬ СИЛЫ'),
- * holdMs, onClash(), onSplit() } with fighter = { name, sub, color, side (1|-1), power, king }.
+ * holdMs, onClash(), onSplit() } with fighter = { name, sub, color, side (1|-1), power, king,
+ * glyph (one kanji painted on the portrait, e.g. 侍 / 神 / 主) }.
  * Timeline (real ms): 0–260 panels slam in · 260 clash (line + 対決 via onClash) · hold ·
  * holdMs exit 300 ms. Resolves when the overlay is gone.
  */
@@ -403,7 +474,7 @@ export function versus(fx, o = {}) {
   const nameSize = Math.round(clamp(W * 0.14, 36, 84));
   const subSize = Math.round(clamp(W * 0.043, 14, 24));
   const specs = [`${nameSize}px "Dela Gothic One"`, `${subSize}px "Russo One"`, `900 ${subSize}px "Unbounded"`];
-  const txt = `${o.top.name}${o.bottom.name}${o.top.sub || ''}${o.bottom.sub || ''}${o.label || ''}0123456789`;
+  const txt = `${o.top.name}${o.bottom.name}${o.top.sub || ''}${o.bottom.sub || ''}${o.label || ''}${o.top.glyph || ''}${o.bottom.glyph || ''}0123456789`;
   return afterFonts(fx, specs, txt, () => versusNow(fx, o, { nameSize, subSize }));
 }
 
@@ -460,7 +531,7 @@ function versusNow(fx, o, P) {
     streaks.blendMode = 'add';
     content.addChild(streaks);
     // big glow behind the portrait
-    const px = F.dir < 0 ? W * 0.3 : W * 0.7;
+    const px = F.dir < 0 ? W * 0.26 : W * 0.74;
     const py = F.dir < 0 ? cy - W * 0.5 : cy + W * 0.5;
     const glow = fx._sprite(T.frame('dot'), content);
     glow.blendMode = 'add';
@@ -475,7 +546,28 @@ function versusNow(fx, o, P) {
     rays.position.set(px, py);
     rays.scale.set((W * 1.5) / 256);
     const pSize = Math.round(Math.min(320, W * 0.82));
-    const portrait = fx._sprite(T.emblem(f.side === -1 ? -1 : 1, { epic: true, king: !!f.king, size: pSize }), content);
+    // portrait: the fighter's disc with an ink-brush ensō and their kanji (侍 / 神 / 主…) painted
+    // huge on it — a character, not a generic emblem (EAD-06). Without a glyph: the old emblem.
+    const portrait = fx._box(content, 'vs-portrait');
+    const disc = fx._sprite(T.emblem(f.side === -1 ? -1 : 1, { epic: true, king: !!f.king && !f.glyph, size: pSize }), portrait);
+    disc.scale.set(1);
+    if (f.glyph) {
+      const brushSeed = f.side === -1 ? 3 : 8;
+      const ink = fx._sprite(T.brush(brushSeed, pSize), portrait);
+      ink.tint = 0x000000;
+      ink.alpha = 0.8;
+      ink.scale.set(1.26);
+      ink.rotation = 0.3;
+      const neon = fx._sprite(T.brush(brushSeed, pSize), portrait);
+      neon.tint = mixHex(col, 0xffffff, 0.25);
+      neon.alpha = 0.95;
+      neon.rotation = 0.3;
+      neon.scale.set(1.18);
+      const gSize = Math.round(pSize * 0.37);
+      const glyph = fx._textSprite(f.glyph, kanjiStyle(fx, gSize, col), portrait, e, f.side === -1 ? 11 : 5);
+      glyph.position.set(-pSize * 0.01, pSize * 0.01);
+      glyph.rotation = -0.06 * (f.side === -1 ? -1 : 1);
+    }
     portrait.position.set(px, py);
     const pBase = (W * 0.8) / pSize;
     portrait.scale.set(pBase);
@@ -713,6 +805,40 @@ export function godrays(fx, o = {}) {
     },
     end: () => h.release(),
   };
+  return fx._run(e);
+}
+
+/**
+ * Screen-space sword slash (a tapered light streak that sweeps across, then fades), drawn ABOVE
+ * screen lettering — e.g. across the 完璧 kanji. opts: { length (px), color, width (px), duration }.
+ */
+export function screenSlash(fx, x, y, angle, o = {}) {
+  if (!usable(fx)) return done();
+  const len = o.length || fx.renderer.screen.width * 0.8;
+  const color = o.color != null ? o.color : 0xffffff;
+  const w = o.width || 14;
+  const e = { cleanup: [], realtime: true, duration: o.duration || 360 };
+  const box = fx._box(fx.c.screenUI, 'director-slash');
+  box.position.set(x, y);
+  box.rotation = angle;
+  const glow = fx._sprite(fx.textures.frame('flare'), box);
+  glow.blendMode = 'add';
+  glow.tint = color;
+  const core = fx._sprite(fx.textures.frame('flare'), box);
+  core.blendMode = 'add';
+  core.tint = 0xffffff;
+  e.update = (dt, t, k) => {
+    const sweep = Ease.outCubic(clamp01(k / 0.35));
+    const fade = k < 0.35 ? 1 : Math.pow(1 - (k - 0.35) / 0.65, 1.4);
+    const L = len * sweep;
+    glow.position.set(-len / 2 + L / 2, 0);
+    glow.scale.set(L / 128, (w * 2.2 * fade) / 24);
+    glow.alpha = 0.9 * fade;
+    core.position.copyFrom(glow.position);
+    core.scale.set(L / 128, (w * 0.6 * fade) / 24);
+    core.alpha = fade;
+  };
+  e.end = () => fx._dispose(box);
   return fx._run(e);
 }
 

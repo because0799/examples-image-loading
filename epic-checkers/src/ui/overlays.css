@@ -728,6 +728,17 @@
   box-shadow: 3px 3px 0 var(--go-b);
   animation: statPop 0.35s var(--in, 0.8s) cubic-bezier(0.2, 1.6, 0.4, 1) both;
 }
+.go-stat.is-hot {
+  border-color: #ff2e63;
+  box-shadow: 3px 3px 0 var(--go-b), 0 0 14px rgba(255, 46, 99, 0.45);
+}
+.go-stat.is-gold {
+  color: #ffd23f;
+  border-color: #ffd23f;
+  background: linear-gradient(100deg, rgba(255, 210, 63, 0.22), rgba(0, 0, 0, 0.55));
+  box-shadow: 3px 3px 0 var(--go-b), 0 0 16px rgba(255, 210, 63, 0.45);
+  text-shadow: 0 0 8px rgba(255, 210, 63, 0.6);
+}
 @keyframes statPop {
   from {
     opacity: 0;

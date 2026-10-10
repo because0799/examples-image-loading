@@ -119,13 +119,13 @@ test('russian: king and man capture choices coexist', () => {
 test('russian: giveaway — no pieces / no moves wins', () => {
   // black has no pieces left: in normal play white won; in giveaway black won
   const normal = place(R, -1, { w: ['c3'] });
-  assert.deepEqual(E.positionResult(normal), { winner: 1, reason: 'no-pieces' });
+  assert.deepEqual(E.positionResult(normal), { winner: 1, reason: 'no-pieces', detail: 'no-pieces' });
   const gw = place(R, -1, { w: ['c3'] }, { giveaway: true });
-  assert.deepEqual(E.positionResult(gw), { winner: -1, reason: 'no-pieces' });
+  assert.deepEqual(E.positionResult(gw), { winner: -1, reason: 'no-pieces', detail: 'no-pieces' });
   // white is blocked (man a1? no — man h2 blocked by g3 and nothing to capture)
   const blocked = place(R, 1, { w: ['h2'], b: ['g3', 'f4'] });
   assert.deepEqual(E.legalMoves(blocked), []);
-  assert.deepEqual(E.positionResult(blocked), { winner: -1, reason: 'no-moves' });
+  assert.deepEqual(E.positionResult(blocked), { winner: -1, reason: 'no-moves', detail: 'no-moves' });
   const blockedGw = place(R, 1, { w: ['h2'], b: ['g3', 'f4'] }, { giveaway: true });
-  assert.deepEqual(E.positionResult(blockedGw), { winner: 1, reason: 'no-moves' });
+  assert.deepEqual(E.positionResult(blockedGw), { winner: 1, reason: 'no-moves', detail: 'no-moves' });
 });

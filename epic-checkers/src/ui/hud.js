@@ -1,10 +1,18 @@
 // Game screen + HUD. The screen element is persistent (created once); HUD methods work whether
 // or not the game screen is currently visible.
 //
-// Layout (portrait):  top panel (opponent) / #board-slot (max square) / status / bottom panel / actions
-// Layout (landscape): opponent + status | board | player + actions
+// Layout (portrait):  top panel (opponent) / board area (full width) / status / bottom panel / actions
+//                     The board area spans the whole screen width; #board-slot is the largest
+//                     square that fits. The free space above / below the slot inside the board area
+//                     are the "lanes" (hud.lanes()) the Director uses for banners, captions and the
+//                     combo counter.
+// Layout (landscape): opponent + status | board | player + actions (no lanes)
+//
+// Public HUD API (ui.hud): setup, setTurn, setCounts, setThinking, setHype, toast, setCanUndo,
+// setCanHint, setStatus(text, { tone, duration }), setSkippable, setCinematic(on), lanes(), refresh,
+// state.
 
-import { h, tap } from './dom.js';
+import { h, tap, fitText } from './dom.js';
 import { t, loc } from './i18n.js';
 import { icon } from './icons.js';
 import { flagEl } from './flags.js';
@@ -12,6 +20,25 @@ import { pieceChip } from './components.js';
 import { LEVEL_GLYPHS } from './titles.js';
 
 const BOARD_PAD = 4;
+const LANE_GAP = 4; // px kept free next to the panels / board slot
+const LANE_MIN = 8; // smaller gaps are reported as no lane (null)
+const CINEMATIC_FAILSAFE_MS = 8000; // the HUD always comes back after this long (wall clock)
+const LONG_STATUS = 20; // longer status texts use the compact two-line style
+
+/**
+ * Display names for both sides: in an AI-vs-AI demo two equal names («Самурай» vs «Самурай») get
+ * the side added («Самурай белых» / «Самурай чёрных», EN "White Samurai").
+ * names: { 1: string, -1: string } -> { 1, -1 }
+ */
+export function distinctNames(names, mode) {
+  const w = names[1] ?? names['1'];
+  const b = names[-1] ?? names['-1'];
+  if (mode !== 'demo' || !w || w !== b) return { 1: w, '-1': b };
+  return {
+    1: t('hud.sideName', { name: w, side: t('common.whiteGen') }),
+    '-1': t('hud.sideName', { name: b, side: t('common.blackGen') }),
+  };
+}
 
 function buildPanel(pos) {
   const r = {};
@@ -26,7 +53,7 @@ function buildPanel(pos) {
       (r.avatar = h('span.hp__avatar', h('span.hp__disc'), (r.glyph = h('span.hp__glyph')), h('span.hp__ring'))),
       h(
         'div.hp__info',
-        (r.name = h('div.hp__name')),
+        (r.name = h('div.hp__name', { 'data-fit': '12' })),
         h(
           'div.hp__sub',
           (r.sub = h('span.hp__subtext')),
@@ -69,6 +96,7 @@ export function createGameScreen(ui) {
     statusTone: '',
     statusCustom: false,
     skippable: false,
+    cinematic: 0,
   };
 
   const top = buildPanel('top');
@@ -77,18 +105,21 @@ export function createGameScreen(ui) {
 
   const slot = h('div', { id: 'board-slot' });
   const toasts = h('div.toasts', { 'aria-live': 'polite' });
+  const boardArea = h('div.board-area', slot, toasts);
+
+  // «Пропустить» lives in the status row (never over the board squares or the lanes): while it is
+  // shown the status pill fades out and the chip takes its place.
   const skipChip = h(
     'button.skip-chip',
-    { type: 'button', on: { click: tap(() => ui.emit('skip'), { sound: null, haptic: 6 }) } },
+    { type: 'button', tabindex: '-1', on: { click: tap(() => ui.emit('skip'), { sound: null, haptic: 6 }) } },
     h('span.skip-chip__label'),
     icon('speed'),
   );
-  const boardArea = h('div.board-area', slot, toasts, skipChip);
-
   const statusFlag = h('span.status__flag');
   const statusText = h('span.status__text');
   const statusTag = h('span.status__tag');
-  const statusEl = h('div.status', statusFlag, h('span.status__pill', h('span.status__dot'), statusText), statusTag);
+  const statusPill = h('span.status__pill', h('span.status__dot'), statusText);
+  const statusEl = h('div.status', statusFlag, statusPill, statusTag, skipChip);
 
   const mkAction = (name, key, onClick) => {
     const label = h('span.act__label');
@@ -108,13 +139,11 @@ export function createGameScreen(ui) {
   const actHint = mkAction('hint', 'hud.hint', () => !actHint.disabled && ui.emit('hint'));
   const actions = h('div.actions', actMenu, actUndo, actHint);
 
-  const el = h(
-    'div.screen.screen--game',
-    h('div.game', top.el, boardArea, statusEl, bottom.el, actions),
-  );
+  const game = h('div.game', top.el, boardArea, statusEl, bottom.el, actions);
+  const el = h('div.screen.screen--game', game);
 
   // ------------------------------------------------------------ rendering helpers
-  function playerInfo(color) {
+  function rawPlayerInfo(color) {
     const p = st.players[color] || {};
     const isHuman = p.isHuman != null ? !!p.isHuman : st.mode === 'pvp' || (st.mode === 'ai' && color === st.bottomColor);
     const level = p.level || st.level || 3;
@@ -141,6 +170,15 @@ export function createGameScreen(ui) {
     return { isHuman, name, sub, glyph, level, colorName };
   }
 
+  function playerInfo(color) {
+    const info = rawPlayerInfo(color);
+    if (st.mode === 'demo') {
+      const names = distinctNames({ 1: rawPlayerInfo(1).name, '-1': rawPlayerInfo(-1).name }, st.mode);
+      info.name = names[color];
+    }
+    return info;
+  }
+
   function renderPanel(color) {
     const r = panelFor(color);
     const info = playerInfo(color);
@@ -148,6 +186,7 @@ export function createGameScreen(ui) {
     r.el.classList.toggle('is-human', info.isHuman);
     r.el.classList.toggle('is-ai', !info.isHuman);
     r.name.textContent = info.name;
+    fitText(r.name, { min: 12 }); // «Самурай чёрных» shrinks a little instead of «Самурай чёрн…»
     r.sub.textContent = info.sub;
     r.glyph.textContent = st.epic ? info.glyph : info.isHuman ? '' : String(info.level);
     r.kanji.textContent = st.epic ? info.glyph : '';
@@ -200,14 +239,26 @@ export function createGameScreen(ui) {
     return st.turn > 0 ? t('hud.turnWhite') : t('hud.turnBlack');
   }
 
+  // texts that are alerts even when the caller passes no tone
+  const ALERT_KEYS = ['hud.mustCapture', 'status.mustCapture', 'status.yourTurnCapture'];
+  const isAlertText = (text) => !!text && ALERT_KEYS.some((k) => t(k) === text);
+
   function paintStatus() {
     const text = st.statusCustom ? st.status : defaultStatus();
     statusText.textContent = text;
     let tone = st.statusTone;
-    if (!tone && text && text === t('hud.mustCapture')) tone = 'alert';
+    if (!tone && isAlertText(text)) tone = 'alert';
     statusEl.dataset.tone = tone || '';
     statusEl.dataset.side = String(st.turn || 0);
     statusEl.classList.toggle('is-empty', !text);
+    // Explanations («Бей максимум: эта шашка берёт меньше», «Ничья через 3 хода…») use a compact
+    // two-line style; the row keeps its height so the board never moves.
+    let long = text.length > LONG_STATUS;
+    statusEl.classList.toggle('is-long', long);
+    if (!long && text && statusPill.isConnected && statusPill.clientWidth) {
+      long = statusText.scrollWidth > statusText.clientWidth + 1;
+      if (long) statusEl.classList.add('is-long');
+    }
   }
 
   function paintActions() {
@@ -221,7 +272,12 @@ export function createGameScreen(ui) {
     actUndo.disabled = !st.canUndo;
     actHint.disabled = !st.canHint;
     skipChip.querySelector('.skip-chip__label').textContent = t('hud.skip');
+    paintSkip();
+  }
+
+  function paintSkip() {
     skipChip.classList.toggle('is-on', st.skippable);
+    statusEl.classList.toggle('has-skip', st.skippable);
   }
 
   function paintMeta() {
@@ -252,18 +308,23 @@ export function createGameScreen(ui) {
     const hh = boardArea.clientHeight;
     if (!w || !hh) return;
     const size = Math.max(0, Math.floor(Math.min(w, hh) - BOARD_PAD * 2));
+    const left = Math.round((w - size) / 2);
+    const topPx = Math.round((hh - size) / 2);
     slot.style.width = size + 'px';
     slot.style.height = size + 'px';
-    slot.style.left = Math.round((w - size) / 2) + 'px';
-    slot.style.top = Math.round((hh - size) / 2) + 'px';
+    slot.style.left = left + 'px';
+    slot.style.top = topPx + 'px';
     el.style.setProperty('--board-size', size + 'px');
     const rect = slotRect();
-    const key = `${rect.x},${rect.y},${rect.width},${rect.height}`;
+    const ln = lanes();
+    const key = `${rect.x},${rect.y},${rect.width},${rect.height}|${laneKey(ln.top)}|${laneKey(ln.bottom)}`;
     if (key !== lastRect) {
       lastRect = key;
+      paintStatus(); // the status pill may need the compact style at the new width
       ui.emit('board-rect', rect);
     }
   }
+  const laneKey = (l) => (l ? `${l.y},${l.h}` : '-');
 
   // The game screen never uses transforms (it only fades), so the client rect is exact.
   function slotRect() {
@@ -272,10 +333,86 @@ export function createGameScreen(ui) {
     return new DOMRect(r.x, r.y, r.width, r.height);
   }
 
+  /**
+   * Layout box of `node` in viewport CSS px, ignoring CSS transforms (the panels slide out during
+   * cinematics; the lanes must not change with them). Walks the offsetParent chain up to .game.
+   */
+  function layoutBox(node) {
+    let x = 0;
+    let y = 0;
+    let n = node;
+    while (n && n !== game) {
+      x += n.offsetLeft;
+      y += n.offsetTop;
+      n = n.offsetParent;
+    }
+    const g = game.getBoundingClientRect();
+    return { x: g.x + x, y: g.y + y, w: node.offsetWidth, h: node.offsetHeight };
+  }
+
+  /**
+   * Free vertical space above and below the board slot, in viewport CSS px:
+   * top    = between the top player panel and the board slot,
+   * bottom = between the board slot and the status row (the «Пропустить» chip lives in the status
+   *          row, so it is never inside a lane).
+   * A side is null when there is no such space (landscape layout, short screens: < 8 px).
+   */
+  function lanes() {
+    const none = { top: null, bottom: null };
+    if (!el.isConnected || !slot.offsetWidth) return none;
+    const s = layoutBox(slot);
+    const overlapsX = (b) => Math.min(b.x + b.w, s.x + s.w) - Math.max(b.x, s.x) > 0;
+    const mk = (y0, y1) => {
+      const yy = Math.round(y0 + LANE_GAP);
+      const hh = Math.round(y1 - LANE_GAP) - yy;
+      return hh >= LANE_MIN ? { y: yy, h: hh } : null;
+    };
+    const tp = layoutBox(top.el);
+    const topLane = overlapsX(tp) && tp.y + tp.h <= s.y + 1 ? mk(tp.y + tp.h, s.y) : null;
+    const below = [layoutBox(statusEl), layoutBox(bottom.el)].filter((b) => b.h > 0 && overlapsX(b) && b.y >= s.y + s.h - 1);
+    const limit = below.length ? Math.min(...below.map((b) => b.y)) : null;
+    const bottomLane = limit != null ? mk(s.y + s.h, limit) : null;
+    return { top: topLane, bottom: bottomLane };
+  }
+
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => layout());
     ro.observe(boardArea);
+    ro.observe(top.el);
+    ro.observe(statusEl);
   }
+
+  // ------------------------------------------------------------ cinematic mode (HUD slides away)
+  let cineTimer = 0;
+  function paintCinematic() {
+    el.classList.toggle('is-cinematic', st.cinematic > 0);
+  }
+  function setCinematic(on) {
+    clearTimeout(cineTimer);
+    if (on) {
+      st.cinematic += 1;
+      // failsafe: an unbalanced call must never hide the menu button for long
+      cineTimer = setTimeout(() => {
+        st.cinematic = 0;
+        paintCinematic();
+      }, CINEMATIC_FAILSAFE_MS);
+    } else st.cinematic = Math.max(0, st.cinematic - 1);
+    if (st.cinematic > 0 && !on) {
+      cineTimer = setTimeout(() => {
+        st.cinematic = 0;
+        paintCinematic();
+      }, CINEMATIC_FAILSAFE_MS);
+    }
+    paintCinematic();
+  }
+  function resetCinematic() {
+    clearTimeout(cineTimer);
+    st.cinematic = 0;
+    paintCinematic();
+  }
+
+  // ------------------------------------------------------------ temporary status (opts.duration)
+  let statusTimer = 0;
 
   // ------------------------------------------------------------ public HUD API
   const hud = {
@@ -300,6 +437,8 @@ export function createGameScreen(ui) {
       st.statusTone = '';
       st.statusCustom = false;
       st.skippable = false;
+      clearTimeout(statusTimer);
+      resetCinematic();
       toasts.textContent = '';
       ui.setTheme(st.epic);
       renderAll();
@@ -309,6 +448,7 @@ export function createGameScreen(ui) {
       st.turn = color === -1 ? -1 : color === 1 ? 1 : 0;
       st.statusCustom = false;
       st.statusTone = '';
+      clearTimeout(statusTimer);
       top.el.classList.toggle('is-active', st.turn === -st.bottomColor);
       bottom.el.classList.toggle('is-active', st.turn === st.bottomColor);
       paintStatus();
@@ -346,18 +486,55 @@ export function createGameScreen(ui) {
       st.canHint = !!v;
       actHint.disabled = !st.canHint;
     },
-    /** text: string ('' = default "whose turn" text); opts.tone: 'alert' | 'info' | 'epic' */
+    /**
+     * text: string ('' = default "whose turn" text). Long explanations (e.g. t('status.mustCaptureMax'))
+     * are shown in a compact two-line style.
+     * opts.tone: 'alert' | 'info' | 'epic'; opts.duration: ms, after which the default status returns
+     * (unless another status / turn was set in between).
+     */
     setStatus(text, opts = {}) {
+      clearTimeout(statusTimer);
       st.statusCustom = !!text;
       st.status = text || '';
       st.statusTone = opts.tone || '';
       paintStatus();
-      if (st.statusTone === 'alert' || (text && text === t('hud.mustCapture'))) pulse(statusEl, 'status-flash');
+      if (st.statusTone === 'alert' || isAlertText(text)) pulse(statusEl, 'status-flash');
+      const ms = Number(opts.duration);
+      if (text && ms > 0) {
+        statusTimer = setTimeout(() => {
+          if (st.statusCustom && st.status === text) {
+            st.statusCustom = false;
+            st.status = '';
+            st.statusTone = '';
+            paintStatus();
+          }
+        }, ms);
+      }
     },
     /** Shows the «Пропустить» chip while a skippable cinematic plays (tap emits 'skip'). */
     setSkippable(v) {
       st.skippable = !!v;
-      skipChip.classList.toggle('is-on', st.skippable);
+      paintSkip();
+    },
+    /**
+     * Cinematic mode (VS intro, finales, ULTIMATE, epic game over): the player panels, the status
+     * pill and the action buttons slide/fade out, and come back on setCinematic(false). Calls nest
+     * (balanced true/false); a failsafe brings the HUD back after 8 s, and opening the pause menu
+     * brings it back at once. The «Пропустить» chip stays visible.
+     */
+    setCinematic(on) {
+      setCinematic(!!on);
+    },
+    /** Brings the HUD back at once, whatever the nesting (new game, pause, game over). */
+    resetCinematic() {
+      resetCinematic();
+    },
+    get cinematic() {
+      return st.cinematic > 0;
+    },
+    /** { top: { y, h } | null, bottom: { y, h } | null } — free space above / below the board (CSS px). */
+    lanes() {
+      return lanes();
     },
     /** Re-renders all labels (language / title change). */
     refresh() {
@@ -391,7 +568,10 @@ export function createGameScreen(ui) {
     hud,
     layout,
     slotRect,
+    lanes,
     renderAll,
+    resetCinematic,
+    playerInfo,
     onShow: () => {
       renderAll();
       layout();

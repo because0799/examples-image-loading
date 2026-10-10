@@ -42,7 +42,7 @@ test('AI level names (normal + epic) exist', () => {
   setLang('en');
   assert.equal(t('level.4'), 'Master');
   assert.equal(t('levelEpic.4'), 'Shogun');
-  assert.equal(t('levelEpic.5'), 'God of Draughts');
+  assert.equal(t('levelEpic.5'), 'Checkers God');
   setLang('ru');
 });
 
@@ -78,5 +78,17 @@ test('interpolation, fallbacks, lists, loc', () => {
   setLang('en');
   assert.equal(loc({ ru: 'а', en: 'b' }), 'b');
   assert.equal(loc('plain'), 'plain');
+  setLang('ru');
+});
+
+test('UI level names are the same as the AI module names (setup screen = in-game HUD)', async () => {
+  const { AI_LEVELS } = await import('../../src/ai/levels.js');
+  for (const lang of ['ru', 'en']) {
+    setLang(lang);
+    for (const L of AI_LEVELS) {
+      assert.equal(t(`level.${L.id}`), L.name[lang], `${lang} level.${L.id}`);
+      assert.equal(t(`levelEpic.${L.id}`), L.epicName[lang], `${lang} levelEpic.${L.id}`);
+    }
+  }
   setLang('ru');
 });

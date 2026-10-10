@@ -17,8 +17,8 @@
  *   - A man reaching the last row during a capture becomes a king immediately and continues
  *     capturing as a king in the same move (midPromotion: 'king').
  *   - Draws (implemented): threefold repetition (Game); 15 moves (each side) of king moves only,
- *     no captures and no man moves; 3+ kings vs a lone king: the strong side has 15 own moves
- *     from the moment the balance arose; 3 pieces (any) vs a lone king standing on the main road
+ *     no captures and no man moves; 3+ kings (with any number of extra men, Minsport 6.1.8.4) vs a
+ *     lone king: the strong side has 15 own moves from the moment the balance arose; 3 pieces (any) vs a lone king standing on the main road
  *     (a1–h8): the strong side has 5 own moves; both sides having kings with unchanged material
  *     (no capture, no promotion): 2–3 pieces 5 moves, 4–5 pieces 30, 6–7 pieces 60.
  *
@@ -67,12 +67,14 @@
  *
  * POOL (American pool checkers). Sources: en.wikipedia «American Pool Checkers» (APCA rules),
  *   playstrategy.org/variant/pool («same rules as Russian draughts, but with no promotion during a
- *   capture chain»), ludoteka.com «Pool checkers».
+ *   capture chain»), ludoteka.com «Pool checkers», gambiter.com «Pool checkers», playstrategy forum
+ *   «on pool draughts rule should be corrected» (quotes the 1947 APCA rulebook, rule 31).
  *   - Dark (BLACK) moves first; men capture backward; flying kings; capture mandatory with free
  *     choice of sequence, must be completed; Turkish strike; a man reaching the king row during a
  *     capture continues as a man and is crowned only if the move ends there (midPromotion 'man').
- *   - Draws (as Russian on lidraughts/playstrategy): repetition; 15 king-only moves each; 3+ kings
- *     vs a lone king: 15 moves of the strong side.
+ *   - Draws: repetition, agreement; 3+ kings vs a lone king: the strong side must win within 13 own
+ *     moves (APCA: «must win within thirteen moves», 1947 rulebook: «before the long king counts
+ *     thirteen»; playstrategy's 15 was copied from Russian); app rule — 15 king-only moves each.
  *
  * ITALIAN. Sources: en.wikipedia «Italian draughts», Federdama «Elementary course of Italian
  *   draughts», ludoteka.com, playcheckers.io.
@@ -91,7 +93,10 @@
  *   (light square on the right, double corner on the left), checkersonline.io, Jocly rules.
  *   - Same geometry as Italian (parity 0). White first; men forward only (move & capture); flying
  *     kings; Turkish strike; majority capture, ties → most kings ("ley de cantidad/calidad");
- *     promotion ends the move (men cannot capture backward). Draw: 20 king-only moves each.
+ *     promotion ends the move (men cannot capture backward). Draw: app rule — 20 king-only moves each.
+ *   - Traditionally played on the LIGHT squares (a dark-square board with the same layout is the
+ *     Portuguese look). The app keeps the playing squares dark like every other variant (same
+ *     geometry, no renderer special case); the rules text says so (RO-8).
  *
  * CZECH (extra). Sources: ČFD «Pravidla české dámy» (damweb.cz), en.wikipedia «Czech draughts».
  *   - a1 dark, 12 men each on 3 rows, white first; men forward only (move & capture); flying
@@ -100,8 +105,9 @@
  *   - Draws: repetition, agreement; app rule — 30 king-only moves each without captures.
  *
  * GIVEAWAY (поддавки / antidraughts) option: same move rules; the side that cannot move (no pieces
- *   or blocked) WINS. Material-based endgame draw limits are disabled; the variant's king-move
- *   (no-progress) limit and threefold repetition remain.
+ *   or blocked) WINS. Material-based endgame draw limits and the Turkish one-piece-each draw are
+ *   disabled; the variant's no-progress limit and threefold repetition remain (texts:
+ *   variant.giveawayRules, built by giveawayText() in rules-text.js; generic: GIVEAWAY_RULES).
  *
  * Not added: Armenian (Tama), Thai — sources found were too inconsistent to implement with
  * confidence.
@@ -122,10 +128,16 @@
  *   menCaptureKings false in Italian
  *   draw            { quietMoves, quietProgress: 'man' | 'forward', rules: [...], oneEach }
  *                   quietMoves: moves EACH without progress (capture / man move) → draw.
+ *                   rules: endgame limits (rules.js EG_RULES): r3v1, p3v1, rRoad, rBalance, f16,
+ *                   f5, bRoad. appRule: the no-progress limit is the app's own (no source rule);
+ *                   the texts say «правило приложения» / "app rule".
+ *
+ * Metadata added for the UI besides name/short/badges/rules: giveawayRules { ru, en } — the
+ * поддавки paragraphs for this variant (what changes in its draw rules).
  *   notation        'algebraic' (e3) | 'numeric' (1..N, FMJD style)
  */
 
-import { RULES_TEXT, GIVEAWAY_RULES } from './rules-text.js';
+import { RULES_TEXT, GIVEAWAY_RULES, giveawayText, nbsp } from './rules-text.js';
 
 const BASE_DIAGONAL = {
   geometry: 'diagonal',
@@ -146,6 +158,8 @@ function def(meta, flags) {
   const v = { ...BASE_DIAGONAL, ...flags, ...meta };
   v.rules = RULES_TEXT[v.id];
   if (!v.rules) throw new Error(`Missing rules text for ${v.id}`);
+  v.short = Object.freeze({ ru: nbsp(v.short.ru), en: nbsp(v.short.en) });
+  v.giveawayRules = giveawayText(v.draw);
   return Object.freeze(v);
 }
 
@@ -160,7 +174,7 @@ export const VARIANTS = [
       first: 1,
       name: { ru: 'Русские шашки', en: 'Russian draughts' },
       short: {
-        ru: 'Классика: дамка летает, простые бьют назад, превращение прямо во время боя.',
+        ru: 'Классика: дамка летает, простые бьют назад, превращение в дамку прямо во время боя.',
         en: 'The classic: flying kings, men capture backwards, promotion mid-capture.',
       },
       badges: {
@@ -185,11 +199,11 @@ export const VARIANTS = [
       first: 1,
       name: { ru: 'Турецкие шашки', en: 'Turkish draughts' },
       short: {
-        ru: 'Дама: ходы по прямой вперёд и вбок, 16 шашек, бить максимум — обязательно.',
-        en: 'Dama: orthogonal moves forward and sideways, 16 pieces, maximum capture.',
+        ru: 'Турецкая «дама»: простые ходят по прямой вперёд и вбок, по 16 шашек, бить максимум обязательно.',
+        en: 'Turkish dama: men move straight forward and sideways, 16 pieces each, maximum capture.',
       },
       badges: {
-        ru: ['Все 64 поля', 'Ходы по прямой', 'Летающая дама', 'Бить максимум'],
+        ru: ['Все 64 поля', 'Ходы по прямой', 'Дамка летает', 'Бить максимум'],
         en: ['All 64 squares', 'Orthogonal', 'Flying kings', 'Max capture'],
       },
     },
@@ -204,7 +218,7 @@ export const VARIANTS = [
       removal: 'immediate',
       noReverse: true,
       midPromotion: 'man',
-      draw: { quietMoves: 50, quietProgress: 'forward', rules: [], oneEach: true },
+      draw: { quietMoves: 50, quietProgress: 'forward', rules: [], oneEach: true, appRule: true },
     },
   ),
   def(
@@ -217,7 +231,7 @@ export const VARIANTS = [
       first: 1,
       name: { ru: 'Международные шашки', en: 'International draughts' },
       short: {
-        ru: 'Стоклеточные 10×10: 20 шашек, летающие дамки, бить максимум.',
+        ru: 'Стоклеточные шашки: доска 10×10, по 20 шашек, летающие дамки, бить максимум.',
         en: '10×10 board, 20 pieces each, flying kings, maximum capture.',
       },
       badges: {
@@ -244,11 +258,11 @@ export const VARIANTS = [
       name: { ru: 'Английские шашки (чекерс)', en: 'English draughts (checkers)' },
       short: {
         ru: 'Чекерс: простые бьют только вперёд, дамка ходит на одно поле. Начинают чёрные.',
-        en: 'Checkers: men capture forward only, kings move one square. Dark moves first.',
+        en: 'Checkers: men capture forward only, kings move one square. Black moves first.',
       },
       badges: {
-        ru: ['8×8', 'Короткая дамка', 'Бой только вперёд', 'Начинают чёрные'],
-        en: ['8×8', 'Short kings', 'Forward capture', 'Dark starts'],
+        ru: ['8×8', 'Короткая дамка', 'Простые бьют вперёд', 'Начинают чёрные'],
+        en: ['8×8', 'Short kings', 'Men capture forward', 'Black starts'],
       },
     },
     {
@@ -270,7 +284,7 @@ export const VARIANTS = [
       first: 1,
       name: { ru: 'Бразильские шашки', en: 'Brazilian draughts' },
       short: {
-        ru: 'Международные правила на доске 8×8: летающие дамки и обязательный бой максимума.',
+        ru: 'Международные правила на доске 8×8: летающие дамки, бить нужно максимум шашек.',
         en: 'International rules on an 8×8 board: flying kings and maximum capture.',
       },
       badges: {
@@ -296,7 +310,7 @@ export const VARIANTS = [
       name: { ru: 'Пул-чекерс', en: 'Pool checkers' },
       short: {
         ru: 'Американский пул: летающие дамки, бой назад, любой вариант взятия. Начинают чёрные.',
-        en: 'American pool: flying kings, backward captures, any capture sequence. Dark starts.',
+        en: 'American pool: flying kings, backward captures, any capture sequence. Black starts.',
       },
       badges: {
         ru: ['8×8', 'Дамка летает', 'Свободный выбор боя'],
@@ -307,7 +321,7 @@ export const VARIANTS = [
       homeRows: 3,
       capture: 'free',
       midPromotion: 'man',
-      draw: { quietMoves: 15, quietProgress: 'man', rules: ['r3v1'], oneEach: false },
+      draw: { quietMoves: 15, quietProgress: 'man', rules: ['p3v1'], oneEach: false, appRule: true },
     },
   ),
   def(
@@ -336,7 +350,7 @@ export const VARIANTS = [
       capture: 'italian',
       midPromotion: 'stop',
       menCaptureKings: false,
-      draw: { quietMoves: 40, quietProgress: 'man', rules: [], oneEach: false },
+      draw: { quietMoves: 40, quietProgress: 'man', rules: [], oneEach: false, appRule: true },
     },
   ),
   def(
@@ -379,8 +393,8 @@ export const VARIANTS = [
         en: 'Mirrored board, flying kings, men capture forward only, maximum capture.',
       },
       badges: {
-        ru: ['8×8', 'Дамка летает', 'Бить максимум', 'Бой только вперёд'],
-        en: ['8×8', 'Flying kings', 'Max capture', 'Forward capture'],
+        ru: ['8×8', 'Дамка летает', 'Бить максимум', 'Простые бьют вперёд'],
+        en: ['8×8', 'Flying kings', 'Max capture', 'Men capture forward'],
       },
     },
     {
@@ -389,7 +403,7 @@ export const VARIANTS = [
       manBackCapture: false,
       capture: 'max-kings',
       midPromotion: 'stop',
-      draw: { quietMoves: 20, quietProgress: 'man', rules: [], oneEach: false },
+      draw: { quietMoves: 20, quietProgress: 'man', rules: [], oneEach: false, appRule: true },
     },
   ),
   def(
@@ -402,12 +416,12 @@ export const VARIANTS = [
       first: 1,
       name: { ru: 'Чешские шашки', en: 'Czech draughts' },
       short: {
-        ru: 'Летающие дамки и главный закон: если может бить дамка — бьёт дамка.',
+        ru: 'Летающие дамки и главный закон: если бить может дамка — бить обязана дамка.',
         en: 'Flying kings and one golden rule: if a king can capture, a king must capture.',
       },
       badges: {
-        ru: ['8×8', 'Дамка летает', 'Дамка бьёт первой', 'Бой только вперёд'],
-        en: ['8×8', 'Flying kings', 'King captures first', 'Forward capture'],
+        ru: ['8×8', 'Дамка летает', 'Бить обязана дамка', 'Простые бьют вперёд'],
+        en: ['8×8', 'Flying kings', 'King must capture', 'Men capture forward'],
       },
     },
     {
@@ -415,7 +429,7 @@ export const VARIANTS = [
       manBackCapture: false,
       capture: 'king-first',
       midPromotion: 'stop',
-      draw: { quietMoves: 30, quietProgress: 'man', rules: [], oneEach: false },
+      draw: { quietMoves: 30, quietProgress: 'man', rules: [], oneEach: false, appRule: true },
     },
   ),
 ];
@@ -431,3 +445,8 @@ export function getVariant(id) {
 }
 
 export { GIVEAWAY_RULES };
+
+/** Giveaway (поддавки) paragraphs for one variant: { ru: [...], en: [...] }. */
+export function giveawayRules(variantId) {
+  return getVariant(variantId).giveawayRules;
+}

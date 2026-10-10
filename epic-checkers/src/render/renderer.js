@@ -388,20 +388,54 @@ export class Renderer {
     return { x: L.bx + (dc + 0.5) * L.sq, y: L.by + (dr + 0.5) * L.sq };
   }
 
-  /** Square under a SCREEN point (CSS px relative to the canvas), or -1. */
-  squareAt(screenX, screenY) {
+  /**
+   * Square under a SCREEN point (CSS px relative to the canvas), or -1.
+   * Touch tolerance (MUX-11): a tap slightly off the board (within `tolerance` squares of its edge)
+   * counts for the edge square, and a tap on a non-playable square snaps to the nearest playable
+   * neighbour when it lands within `tolerance` squares of that square's edge. Default tolerance:
+   * 0.35 on 10×10 / 12×12 (26–30 px squares on phones), 0.25 on 8×8. Pass { tolerance: 0 } (or
+   * squareAtExact) for the exact cell.
+   */
+  squareAt(screenX, screenY, opts = {}) {
     const L = this.layout;
     if (!L) return -1;
     const p = this.screenToWorld(screenX, screenY);
-    const fx = p.x - L.bx;
-    const fy = p.y - L.by;
-    const span = L.n * L.sq;
-    if (fx < 0 || fy < 0 || fx >= span || fy >= span) return -1;
-    const dc = Math.floor(fx / L.sq);
-    const dr = Math.floor(fy / L.sq);
-    const r = this.flipped ? L.n - 1 - dr : dr;
-    const c = this.flipped ? L.n - 1 - dc : dc;
-    return r * L.n + c;
+    let fx = (p.x - L.bx) / L.sq;
+    let fy = (p.y - L.by) / L.sq;
+    const n = L.n;
+    const tol = opts.tolerance != null ? Math.max(0, +opts.tolerance || 0) : n >= 10 ? 0.35 : 0.25;
+    if (!(fx >= 0 && fy >= 0 && fx < n && fy < n)) {
+      if (!(fx >= -tol && fy >= -tol && fx < n + tol && fy < n + tol)) return -1;
+      fx = Math.min(n - 1e-6, Math.max(0, fx));
+      fy = Math.min(n - 1e-6, Math.max(0, fy));
+    }
+    let dc = Math.floor(fx);
+    let dr = Math.floor(fy);
+    const toSq = (r, c) => (this.flipped ? (n - 1 - r) * n + (n - 1 - c) : r * n + c);
+    let sq = toSq(dr, dc);
+    if (tol > 0 && L.playable !== 'all' && !this.isDarkSquare(sq)) {
+      // the four edge neighbours of a non-playable square are playable: take the closest one
+      const ux = fx - dc;
+      const uy = fy - dr;
+      const cand = [
+        [ux, 0, -1],
+        [1 - ux, 0, 1],
+        [uy, -1, 0],
+        [1 - uy, 1, 0],
+      ].filter(([, r, c]) => dr + r >= 0 && dr + r < n && dc + c >= 0 && dc + c < n);
+      cand.sort((a, b) => a[0] - b[0]);
+      if (cand.length && cand[0][0] <= tol) {
+        dr += cand[0][1];
+        dc += cand[0][2];
+        sq = toSq(dr, dc);
+      }
+    }
+    return sq;
+  }
+
+  /** Exact cell under a screen point (no touch tolerance), or -1. */
+  squareAtExact(screenX, screenY) {
+    return this.squareAt(screenX, screenY, { tolerance: 0 });
   }
 
   worldToScreen(x, y) {
@@ -681,18 +715,48 @@ export class Renderer {
   }
 
   // ===================================================================== frame
+  /**
+   * One frame. Exception-safe: every stage is guarded on its own, so a throw in one effect /
+   * view never stops the Pixi ticker (Ticker only requests the next frame when update() returns).
+   */
   _tick(ticker) {
-    this.clock.update(ticker.deltaMS);
+    this._guard('clock', () => this.clock.update(ticker.deltaMS));
     const gdt = this.clock.delta;
     const rdt = this.clock.realDelta;
     const t = this.clock.now / 1000;
     const rt = this.clock.realNow / 1000;
-    this.camera.update(rdt, gdt);
-    this.camera.apply(this.layers.world);
-    if (this.backdrop) this.backdrop.update(gdt, rdt, t, this.camera);
-    this.boardView.update(gdt, rdt, t, rt);
-    this.highlights.update(rt);
+    this._guard('camera', () => {
+      this.camera.update(rdt, gdt);
+      this.camera.apply(this.layers.world);
+    });
+    if (this.backdrop) this._guard('backdrop', () => this.backdrop.update(gdt, rdt, t, this.camera));
+    if (this.boardView) this._guard('board', () => this.boardView.update(gdt, rdt, t, rt));
+    if (this.highlights) this._guard('highlights', () => this.highlights.update(rt));
     const live = this._live;
-    for (let i = 0; i < live.length; i++) live[i].update(t, rt);
+    for (let i = 0; i < live.length; i++) {
+      const v = live[i];
+      try {
+        v.update(t, rt);
+      } catch (e) {
+        this._frameError('piece', e);
+      }
+    }
+  }
+
+  _guard(where, fn) {
+    try {
+      fn();
+    } catch (e) {
+      this._frameError(where, e);
+    }
+  }
+
+  /** Log a per-frame failure at most once per second (a broken stage would otherwise flood). */
+  _frameError(where, e) {
+    this.frameErrors = (this.frameErrors || 0) + 1;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (this._lastFrameError && now - this._lastFrameError < 1000) return;
+    this._lastFrameError = now;
+    console.error(`[renderer] ${where} update failed`, e);
   }
 }

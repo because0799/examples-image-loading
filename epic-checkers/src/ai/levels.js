@@ -69,13 +69,15 @@ export const AI_LEVELS = Object.freeze([
  *  jitter     ± deterministic per-position evaluation noise (variety without blunders)
  *  threatExt  horizon threat extensions allowed per line (quiet leaf where the opponent threatens a capture)
  *  lmr        late-move reductions
+ *  contempt   how much worse than 0 the AI scores a draw for itself while ≥ 1/3 of the starting
+ *             material is on the board (100 = a man): avoids early repetition draws (search.js)
  */
 export const LEVEL_PARAMS = Object.freeze({
-  1: Object.freeze({ timeMs: 120, maxDepth: 2, multiPV: true, noise: 140, blunder: 0.2, jitter: 0, threatExt: 0, lmr: false }),
-  2: Object.freeze({ timeMs: 220, maxDepth: 4, multiPV: true, noise: 45, blunder: 0.05, jitter: 0, threatExt: 1, lmr: false }),
-  3: Object.freeze({ timeMs: 400, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 8, threatExt: 1, lmr: true }),
-  4: Object.freeze({ timeMs: 1200, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 3, threatExt: 1, lmr: true }),
-  5: Object.freeze({ timeMs: 2500, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 2, threatExt: 1, lmr: true }),
+  1: Object.freeze({ timeMs: 120, maxDepth: 2, multiPV: true, noise: 140, blunder: 0.2, jitter: 0, threatExt: 0, lmr: false, contempt: 20 }),
+  2: Object.freeze({ timeMs: 220, maxDepth: 4, multiPV: true, noise: 45, blunder: 0.05, jitter: 0, threatExt: 1, lmr: false, contempt: 20 }),
+  3: Object.freeze({ timeMs: 400, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 8, threatExt: 1, lmr: true, contempt: 20 }),
+  4: Object.freeze({ timeMs: 1200, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 3, threatExt: 1, lmr: true, contempt: 20 }),
+  5: Object.freeze({ timeMs: 2500, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 2, threatExt: 1, lmr: true, contempt: 20 }),
 });
 
 export function clampLevel(level) {

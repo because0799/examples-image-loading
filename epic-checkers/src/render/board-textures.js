@@ -599,11 +599,27 @@ export function drawEpicBoard(ctx, L) {
       ctx.fillRect(x, y + sq - b, sq, b);
       ctx.fillRect(x + sq - b, y, b, sq);
       if (!dark) {
+        // inactive tiles sink back (EAD-11: the playable diagonals must read at a glance)
+        ctx.fillStyle = 'rgba(3,2,10,0.5)';
+        ctx.fillRect(x, y, sq, sq);
         // faint etched rune on inactive tiles
-        ctx.strokeStyle = 'rgba(150,130,255,0.07)';
+        ctx.strokeStyle = 'rgba(150,130,255,0.06)';
         ctx.lineWidth = Math.max(0.6, sq * 0.03);
         ctx.lineCap = 'round';
         runeGlyph(ctx, x + sq / 2, y + sq / 2, sq * 0.38, r * 31 + c * 7);
+      } else if (!turkish) {
+        // playable tiles are lit energy pads: violet lift, inner glow toward the rim, neon edge
+        ctx.fillStyle = 'rgba(104,74,232,0.50)';
+        ctx.fillRect(x, y, sq, sq);
+        g = ctx.createRadialGradient(x + sq / 2, y + sq / 2, sq * 0.18, x + sq / 2, y + sq / 2, sq * 0.74);
+        g.addColorStop(0, 'rgba(122,92,255,0)');
+        g.addColorStop(1, 'rgba(160,130,255,0.38)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x, y, sq, sq);
+        const e = Math.max(1, sq * 0.03);
+        ctx.strokeStyle = rgba(EPIC.grid, 0.5);
+        ctx.lineWidth = e;
+        ctx.strokeRect(x + e * 1.5, y + e * 1.5, sq - e * 3, sq - e * 3);
       }
     }
   }

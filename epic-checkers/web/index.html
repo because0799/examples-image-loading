@@ -7,7 +7,8 @@
   <meta name="color-scheme" content="dark">
   <meta name="format-detection" content="telephone=no">
   <title>EPIC ШАШКИ</title>
-  <link rel="icon" type="image/png" href="icon-512.png">
+  <!-- tiny inline favicon (browser testing only; the WebView never shows one) -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='27' fill='%23120A2A' stroke='%2329E6FF' stroke-width='6'/%3E%3Ccircle cx='32' cy='32' r='13' fill='none' stroke='%23FF2E63' stroke-width='5'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="fonts.css">
   <link rel="stylesheet" href="app.css">
   <style>
@@ -28,7 +29,8 @@
     .boot__bar { width: 132px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.12); overflow: hidden; }
     .boot__bar i { display: block; width: 40%; height: 100%; background: linear-gradient(90deg, #29E6FF, #FF2E63);
       animation: boot-run 1s cubic-bezier(.6,0,.4,1) infinite; }
-    .boot__msg { max-width: 280px; text-align: center; font: 15px/1.4 system-ui, sans-serif; color: #ffb3c4; }
+    .boot__msg { max-width: 290px; text-align: center; font: 15px/1.4 system-ui, sans-serif; color: #ffb3c4; white-space: pre-line; }
+    .boot__msg small { display: block; margin-top: 8px; font-size: 12px; color: rgba(255,255,255,.45); }
     #boot.is-error .boot__bar { display: none; }
     @keyframes boot-run { from { transform: translateX(-100%); } to { transform: translateX(330%); } }
   </style>
@@ -41,6 +43,55 @@
     <div class="boot__bar"><i></i></div>
     <div class="boot__msg"></div>
   </div>
+  <!--
+    Boot watchdog (F3). Plain ES5 on purpose: it must run on WebViews too old to parse app.js
+    (Chrome < 80 throws a SyntaxError on ?. / ??). main.js sets window.__booted when the first
+    screen is up (window.__bootFailed when it showed its own error). Without that:
+    - app.js failed to parse / crashed at start-up on an old WebView -> an "update WebView" message at once;
+    - any other start-up crash -> a message after 4 s;
+    - nothing at all after 15 s (?boottimeout=ms for tests) -> a hint under the still-running bar.
+  -->
+  <script>
+  (function () {
+    var en = /^en/i.test(navigator.language || '');
+    var m = /Chrome\/(\d+)/.exec(navigator.userAgent || '');
+    var ver = m ? parseInt(m[1], 10) : 0;
+    var T = en ? {
+      old: 'Your Android System WebView is too old for this game. Update \u201cAndroid System WebView\u201d (or Chrome) in Google Play and restart the game.',
+      fail: 'The game could not start. Update \u201cAndroid System WebView\u201d in Google Play and restart the game.',
+      slow: 'Starting takes unusually long\u2026 If the game does not open, update \u201cAndroid System WebView\u201d in Google Play and restart it.'
+    } : {
+      old: 'Версия Android System WebView слишком старая для игры. Обнови \u00abAndroid System WebView\u00bb (или Chrome) в Google Play и перезапусти игру.',
+      fail: 'Игра не смогла запуститься. Обнови \u00abAndroid System WebView\u00bb в Google Play и перезапусти игру.',
+      slow: 'Запуск затянулся\u2026 Если игра так и не откроется, обнови \u00abAndroid System WebView\u00bb в Google Play и перезапусти её.'
+    };
+    var shown = '';
+    function show(kind, error) {
+      if (window.__booted || window.__bootFailed || shown === 'old' || shown === 'fail') return;
+      var el = document.getElementById('boot');
+      var msg = el && el.querySelector('.boot__msg');
+      if (!msg) return;
+      shown = kind;
+      el.className = el.className.replace(/\s*is-(error|slow)/g, '') + (error ? ' is-error' : ' is-slow');
+      msg.textContent = T[kind];
+      if (ver) {
+        var s = document.createElement('small');
+        s.textContent = 'WebView ' + ver + (ver < 87 ? ' (\u2265 87)' : '');
+        msg.appendChild(s);
+      }
+    }
+    window.addEventListener('error', function (e) {
+      if (window.__booted) return;
+      var file = (e && e.filename) || '';
+      var text = (e && e.message) || '';
+      var syntax = (e && e.error && e.error.name === 'SyntaxError') || /SyntaxError/.test(text);
+      if (/app\.js/.test(file) && (syntax || (ver && ver < 87))) show('old', true);
+      else setTimeout(function () { show('fail', true); }, 4000);
+    });
+    var q = /[?&]boottimeout=(\d+)/.exec(location.search);
+    setTimeout(function () { show('slow', false); }, q ? parseInt(q[1], 10) : 15000);
+  })();
+  </script>
   <script src="app.js"></script>
 </body>
 </html>

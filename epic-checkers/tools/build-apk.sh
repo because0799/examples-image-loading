@@ -85,6 +85,11 @@ if [[ "$SKIP_WEB" == 0 ]]; then
   node tools/build-web.mjs
 fi
 [[ -f "$WWW/index.html" ]] || die "dist/www/index.html missing - run without --skip-web"
+if [[ "$SKIP_WEB" == 1 && "${ALLOW_STALE_WEB:-0}" != 1 ]]; then
+  # --skip-web must not package a web build that is older than the sources (F5)
+  STALE="$(find "$ROOT/src" "$ROOT/web" -type f -newer "$WWW/app.js" ! -path '*/src/dev/*' | head -5)"
+  [[ -z "$STALE" ]] || die "dist/www is older than the sources (e.g. ${STALE//$'\n'/, }) - run without --skip-web (or ALLOW_STALE_WEB=1)"
+fi
 
 # ---------------------------------------------------------------- 2. icons
 if [[ "$ICONS" == 1 || ! -f "$RES_SRC/mipmap-xxxhdpi/ic_launcher.png" || ! -f "$RES_SRC/mipmap-anydpi-v26/ic_launcher.xml" ]]; then
@@ -98,8 +103,14 @@ rm -rf "$BUILD"
 mkdir -p "$BUILD/res" "$BUILD/assets/www" "$BUILD/gen" "$BUILD/classes"
 cp -R "$RES_SRC/." "$BUILD/res/"
 cp -R "$WWW/." "$BUILD/assets/www/"
-# never ship source maps or stray OS files
+# never ship source maps, debug copies, unused icons or stray OS files (F5)
 find "$BUILD/assets" \( -name '*.map' -o -name '.DS_Store' -o -name 'Thumbs.db' \) -type f -delete
+rm -f "$BUILD/assets/www/ai-worker.js" "$BUILD/assets/www/icon-512.png"
+sed -i '/href="icon-512\.png"/d' "$BUILD/assets/www/index.html"
+# a --dev bundle (inline source map, __DEV__ = true → debug hooks on) must never be packaged
+if grep -q 'sourceMappingURL=data:' "$BUILD/assets/www/app.js"; then
+  die "dist/www/app.js is a --dev build (inline source map) - run node tools/build-web.mjs without --dev"
+fi
 
 # ---------------------------------------------------------------- 4. resources (aapt v1)
 say "aapt package (minSdk $MIN_SDK, targetSdk $TARGET_SDK)"
@@ -167,6 +178,7 @@ ARSC_METHOD="$(unzip -v "$OUT" resources.arsc | awk '$NF=="resources.arsc"{print
 [[ "$ARSC_METHOD" == "Stored" ]] || die "resources.arsc is '$ARSC_METHOD', must be Stored"
 unzip -l "$OUT" classes.dex >/dev/null || die "classes.dex missing from APK"
 unzip -l "$OUT" assets/www/index.html >/dev/null || die "assets/www/index.html missing from APK"
+unzip -p "$OUT" assets/www/app.js | cmp -s - "$WWW/app.js" || die "packaged app.js differs from dist/www/app.js"
 STAGED_COUNT="$(cd "$BUILD" && find assets -type f | wc -l)"
 PACKED_COUNT="$(unzip -Z1 "$OUT" 'assets/*' | grep -vc '/$' || true)"
 if [[ "$STAGED_COUNT" != "$PACKED_COUNT" ]]; then

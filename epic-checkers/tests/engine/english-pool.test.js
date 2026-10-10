@@ -51,9 +51,9 @@ test('english: a multi-jump must be completed, but any sequence may be chosen', 
 test('english: blocked side loses; giveaway inverts', () => {
   const s = place(EN, 1, { w: ['a1'], b: ['b2', 'c3'] }); // a1 cannot move nor capture (c3 behind b2)
   assert.deepEqual(E.legalMoves(s), []);
-  assert.deepEqual(E.positionResult(s), { winner: -1, reason: 'no-moves' });
+  assert.deepEqual(E.positionResult(s), { winner: -1, reason: 'no-moves', detail: 'no-moves' });
   const g = place(EN, 1, { w: ['a1'], b: ['b2', 'c3'] }, { giveaway: true });
-  assert.deepEqual(E.positionResult(g), { winner: 1, reason: 'no-moves' });
+  assert.deepEqual(E.positionResult(g), { winner: 1, reason: 'no-moves', detail: 'no-moves' });
 });
 
 test('pool: dark moves first; same opening as checkers', () => {

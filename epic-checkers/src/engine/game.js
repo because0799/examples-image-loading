@@ -1,7 +1,7 @@
 // Game: state + history + undo + threefold repetition + resign/agreement + JSON persistence.
 
 import { getVariant } from './variants.js';
-import { legalMoves, applyMove, positionResult } from './rules.js';
+import { legalMoves, applyMove, positionResult, drawProgress } from './rules.js';
 import { createInitialState, cloneState, hashState, serializeState, deserializeState } from './state.js';
 
 function samePath(a, b) {
@@ -84,18 +84,27 @@ export class Game {
     return this.result !== null;
   }
 
-  /** null while the game goes on, else { winner: 1|-1|0, reason }. */
+  /** null while the game goes on, else { winner: 1|-1|0, reason, detail, limit?, rule? } (codes: index.js). */
   get result() {
     if (this._manual) return this._manual;
     if (this._result !== undefined) return this._result;
     if (this._moves === null) this._moves = legalMoves(this.state);
     let r = positionResult(this.state, this._moves);
-    if (!r && this.repetitionCount() >= 3) r = { winner: 0, reason: 'repetition' };
+    if (!r && this.repetitionCount() >= 3) r = { winner: 0, reason: 'repetition', detail: 'repetition' };
     this._result = r;
     return r;
   }
 
-  /** How many times the current position (incl. side to move) has occurred. */
+  /**
+   * The counter-based draw closest to ending the game ({ detail, movesLeft, limit, rule }, see
+   * drawProgress in rules.js), or null when none is running or the game is over.
+   */
+  drawProgress() {
+    if (this.result) return null;
+    return drawProgress(this.state);
+  }
+
+  /** How many times the current position (incl. side to move) has occurred (3 = draw). */
   repetitionCount() {
     const h = this._hashes[this._hashes.length - 1];
     let n = 0;
@@ -137,13 +146,13 @@ export class Game {
   resign(color) {
     if (this.result) return this.result;
     if (color !== 1 && color !== -1) throw new Error('resign: color must be 1 or -1');
-    this._manual = { winner: -color, reason: 'resign' };
+    this._manual = { winner: -color, reason: 'resign', detail: 'resign' };
     return this._manual;
   }
 
   agreeDraw() {
     if (this.result) return this.result;
-    this._manual = { winner: 0, reason: 'agreement' };
+    this._manual = { winner: 0, reason: 'agreement', detail: 'agreement' };
     return this._manual;
   }
 
@@ -164,7 +173,7 @@ export class Game {
     const g = new Game(obj.variantId, obj.options || {}, start);
     for (const p of obj.moves || []) g.play(p);
     if (obj.manual && (obj.manual.reason === 'resign' || obj.manual.reason === 'agreement')) {
-      g._manual = { winner: obj.manual.winner, reason: obj.manual.reason };
+      g._manual = { winner: obj.manual.winner, reason: obj.manual.reason, detail: obj.manual.reason };
     }
     return g;
   }

@@ -49,7 +49,8 @@ export function createStats(ui) {
       'span.stats-hero__text',
       h('span.stats-hero__label', t('stats.yourTitle')),
       h('span.stats-hero__name', { 'data-fit': '14' }, current ? t(`title.${current.id}.name`) : t('menu.rookie')),
-      h('span.stats-hero__desc', current ? t(`title.${current.id}.desc`) : t('stats.empty')),
+      // no title yet: a goal (the «play your first game» note below is shown only once)
+      h('span.stats-hero__desc', current ? t(`title.${current.id}.desc`) : t('stats.noTitle')),
       h(
         'span.stats-hero__prog',
         h('span.stats-hero__bar', { style: { '--p': ((unlocked / TITLES.length) * 100).toFixed(1) + '%' } }),

@@ -97,3 +97,79 @@ test('kanji per event', () => {
   for (let i = 0; i < 30; i++) assert.ok(['斬!', '撃!', 'ドン!', '破!', 'БАХ!', 'ХРЯСЬ!', 'БАМ!'].includes(kanjiFor('capture', 'ru')));
   assert.ok(allKanji().includes('何?!'));
 });
+
+// ---------------------------------------------------------------- grammar audit (MUX-06)
+import { fillLine, bragEvents } from '../../src/fx/brag.js';
+
+const AGREE = [
+  [/шашк[аи]|шашек/, ['шашка', 'шашки', 'шашек']],
+  [/персон[уы]?/, ['персону', 'персоны', 'персон']],
+  [/ход(а|ов)?/, ['ход', 'хода', 'ходов']],
+];
+
+test('every Russian line with a number agrees for n = 1..12 and never says «за один прыжок»', () => {
+  let checked = 0;
+  for (const ev of bragEvents('ru')) {
+    for (const raw of bragLines(ev, 'ru')) {
+      if (!raw.includes('{')) continue;
+      for (let n = 1; n <= 12; n++) {
+        const s = fillLine(raw, { n, name: 'Герой', opp: 'Сёгун' }, 'ru');
+        assert.ok(!/[{}]/.test(s), s);
+        assert.ok(!/за один прыжок/.test(s), `multi-jump is ONE move: ${s}`);
+        // «<n> <noun>» must use the plural form that agrees with n
+        const m = s.match(/(\d+) ([А-Яа-яЁё]+)/g) || [];
+        for (const pair of m) {
+          const [, num, word] = pair.match(/(\d+) ([А-Яа-яЁё]+)/);
+          for (const [re, forms] of AGREE) {
+            if (forms.includes(word) || (re.test(word) && forms.some((f) => f.slice(0, 4) === word.slice(0, 4)))) {
+              assert.equal(word, pluralRu(+num, forms), `${s} (n=${num})`);
+              checked++;
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.ok(checked >= 36, `only ${checked} agreements checked`);
+  assert.equal(fillLine('Резня на {n} {persons}!', { n: 4 }, 'ru'), 'Резня на 4 персоны!');
+  assert.equal(fillLine('Резня на {n} {persons}!', { n: 5 }, 'ru'), 'Резня на 5 персон!');
+  assert.equal(fillLine('{n} {turns} подряд', { n: 3 }, 'ru'), '3 хода подряд');
+});
+
+test('English lines with a number read right for n = 1..12', () => {
+  for (const ev of bragEvents('en')) {
+    for (const raw of bragLines(ev, 'en')) {
+      if (!raw.includes('{')) continue;
+      for (let n = 1; n <= 12; n++) {
+        const s = fillLine(raw, { n }, 'en');
+        assert.ok(!/[{}]/.test(s), s);
+        assert.ok(!/\b1 pieces\b|\b([2-9]|1[0-2]) piece\b/.test(s), s);
+        assert.ok(!/in one leap/.test(s), s);
+      }
+    }
+  }
+});
+
+test('the «Тайная техника:» prefix belongs to the ULTIMATE only, and ULTIMATE names stay short', () => {
+  for (let i = 0; i < 400; i++) {
+    for (const lang of ['ru', 'en']) {
+      const n = 1 + (i % 10);
+      const plain = attackName({ n, side: i % 2 ? 1 : -1, king: i % 3 === 0 }, lang);
+      assert.ok(!plain.includes(':'), `plain ×${n} got a prefix: ${plain}`);
+      const ult = attackName({ n, side: i % 2 ? 1 : -1, ultimate: true }, lang);
+      assert.ok(ult.includes(':'), ult);
+      const words = ult.split(': ')[1].split(' ').length;
+      assert.ok(words <= (lang === 'en' ? 5 : 3), `too long for the cut-in: ${ult}`);
+    }
+  }
+  // a big plain combo echoes its count
+  for (let i = 0; i < 50; i++) assert.match(attackName({ n: 5 }, 'ru'), /Пяти/);
+});
+
+test('streak and rage banks exist in both languages', () => {
+  for (const lang of ['ru', 'en']) {
+    assert.ok(bragLines('streak', lang).length >= 5);
+    assert.ok(bragLines('rage', lang).length >= 5);
+    assert.match(bragLine('streak', { n: 3 }, lang), /3|×3/);
+  }
+});

@@ -3,6 +3,7 @@
 //
 //   const c = new Controller({ ui, renderer, fx, director, audio, ai, native, settings, statsStore, opts });
 //   c.startGame(GameConfig)        // from the UI 'play' event, rematch or the ?screen=game URL
+//   c.resumeGame(save)             // continue an autosaved game (src/app-save.js readSave())
 //   c.stopGame()                   // back to the menus (cancels AI, stops cinematics)
 //
 // Robustness rules:
@@ -11,46 +12,46 @@
 //  - every Director / FX call is guarded (a failing effect never breaks the game): errors are
 //    logged, the renderer is re-synced from the engine state and the game continues;
 //  - after every move the renderer piece map is compared with the engine state (mismatch →
-//    console.error in debug builds + re-sync).
+//    console.error in debug builds + re-sync);
+//  - the running game is autosaved after every move and on pause (Android may kill the WebView
+//    in the background); the save is dropped when the game ends or is abandoned.
+//
+// Player-facing strings come from the UI i18n table via controller-text.js (with fallbacks).
 
 import { WHITE, BLACK, Game, getVariant, findMove, movesWithPrefix, materialCount, stateFromString, stateToString, sqToRc } from './engine/index.js';
 import { AI_LEVELS } from './ai/ai-client.js';
-import { evaluateState } from './ai/search.js';
 import { t, getLang } from './ui/i18n.js';
-
-// Strings the UI i18n table does not have (controller-only messages).
-const STR = {
-  ru: {
-    hintNone: 'Подсказка недоступна',
-    drawDeclinedAi: 'ИИ отказывается от ничьей — бьёмся дальше!',
-    drawAcceptedAi: 'ИИ принимает ничью',
-    recovered: 'Сбой эффекта — позиция восстановлена',
-  },
-  en: {
-    hintNone: 'No hint available',
-    drawDeclinedAi: 'The AI declines the draw — fight on!',
-    drawAcceptedAi: 'The AI accepts the draw',
-    recovered: 'Effect glitch — position restored',
-  },
-};
-const s = (key) => (STR[getLang()] || STR.ru)[key] || key;
+import { text, hasText } from './controller-text.js';
+import { illegalTapReason } from './controller-capture.js';
+import { writeSave, clearSave, saveableMode } from './app-save.js';
 
 // Hype («ЯРОСТЬ») tuning: fills with captures (more for combos), a little when you lose pieces,
 // a bit for promotions. At ≥ 1 the next capture is the ULTIMATE and the meter resets.
-const HYPE_PER_CAPTURE = 0.22;
-const HYPE_COMBO_BONUS = 0.12;
-const HYPE_PER_LOSS = 0.06;
-const HYPE_PROMOTION = 0.12;
+export const HYPE = Object.freeze({ perCapture: 0.22, comboBonus: 0.12, perLoss: 0.06, promotion: 0.12 });
 
 const AI_MIN_DELAY = 450; // perceived thinking time (ms)
 const DEMO_MIN_DELAY = 700;
 const CINEMATIC_TIMEOUT = 25000; // ticker-time watchdog for a Director promise (hang protection)
+/** «Пропустить» chip: shown only once a cinematic has run this long (no flashing on short ones). */
+export const SKIP_CHIP_DELAY = { epic: 900, classic: 1500 };
+/** Taps within this time after the move was committed (or after a path tap) never skip it (MUX-01). */
+export const SKIP_GRACE_MS = 350;
+/** A tap on the next landing square of the committed move counts as move entry within this gap. */
+export const ENTRY_TAP_GAP_MS = 1500;
+/** Release keep-screen-on after this long without any input on the player's own turn (F7). */
+export const IDLE_SCREEN_MS = 3 * 60 * 1000;
+/** Draw offers to the AI (RTR-02): from this move on, accepted only if the AI is not better by more than 0.3 man. */
+export const DRAW_MIN_MOVE = 20;
+export const DRAW_ACCEPT_MAX = 30;
+const STATUS_RESET_MS = 3500;
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sign = (v) => (v > 0 ? 1 : v < 0 ? -1 : 0);
+const isColor = (c) => c === WHITE || c === BLACK;
+const clampLevel = (v, def = 3) => Math.min(5, Math.max(1, Math.round(Number(v) || def)));
 
-function freshStats() {
+export function freshStats() {
   return {
     captures: { 1: 0, '-1': 0 },
     maxCombo: { 1: 0, '-1': 0 },
@@ -62,7 +63,7 @@ function freshStats() {
   };
 }
 
-function cloneStats(st) {
+export function cloneStats(st) {
   const c = (o) => ({ 1: o[1], '-1': o[-1] });
   return {
     captures: c(st.captures),
@@ -73,6 +74,41 @@ function cloneStats(st) {
     hype: c(st.hype),
     moveNumber: st.moveNumber,
   };
+}
+
+/** Updates the per-game stats + hype for one played move (pure: depends only on its inputs). */
+export function applyMoveStats(st, move, mover, plies) {
+  const n = move.captures.length;
+  st.moveNumber = Math.ceil(plies / 2);
+  if (n) {
+    st.captures[mover] += n;
+    st.piecesLost[-mover] += n;
+    st.maxCombo[mover] = Math.max(st.maxCombo[mover], n);
+    if (st.hype[mover] >= 1) {
+      // this capture was the ULTIMATE: the meter is spent
+      st.hype[mover] = 0;
+      st.ultimates[mover]++;
+    } else {
+      st.hype[mover] = Math.min(1, st.hype[mover] + HYPE.perCapture * n + HYPE.comboBonus * (n - 1));
+    }
+    st.hype[-mover] = Math.min(1, st.hype[-mover] + HYPE.perLoss * n);
+  }
+  if (move.promotion) {
+    st.kingsMade[mover]++;
+    if (st.hype[mover] < 1) st.hype[mover] = Math.min(1, st.hype[mover] + HYPE.promotion);
+  }
+  return st;
+}
+
+/** Stats after replaying a Game history, plus the stats before each move (for undo). */
+export function replayStats(history) {
+  const stats = freshStats();
+  const hist = [];
+  history.forEach((h, i) => {
+    hist.push(cloneStats(stats));
+    applyMoveStats(stats, h.move, h.before.turn, i + 1);
+  });
+  return { stats, hist };
 }
 
 const uniqueMoves = (opts) => Array.from(new Set(opts.map((o) => o.move)));
@@ -123,6 +159,27 @@ export function routeMove(move, path, size) {
   return { ...move, path: path.slice(), captures: caps, captured: codes };
 }
 
+/** AI levels per colour for a config: demo games pit two different fighters (MUX-18). */
+export function demoLevels(cfg, rnd = Math.random) {
+  const L = clampLevel(cfg.level);
+  const lw = cfg.levelWhite != null ? clampLevel(cfg.levelWhite, L) : null;
+  const lb = cfg.levelBlack != null ? clampLevel(cfg.levelBlack, L) : null;
+  if (lw && lb) return { 1: lw, '-1': lb };
+  const other = L > 1 ? L - 1 : 2;
+  return rnd() < 0.5 ? { 1: L, '-1': other } : { 1: other, '-1': L };
+}
+
+/**
+ * A fighter name with its side, for two equal AIs in a demo: the UI's wording («Самурай белых» /
+ * 'White Samurai', keys hud.sideName + common.whiteGen / blackGen) or a fallback.
+ */
+export function sideNamed(name, color, lang) {
+  const sideKey = color > 0 ? 'common.whiteGen' : 'common.blackGen';
+  if (hasText('hud.sideName') && hasText(sideKey)) return text('hud.sideName', { name, side: text(sideKey) });
+  if (lang === 'en') return `${color > 0 ? 'White' : 'Black'} ${name}`;
+  return `${name} ${color > 0 ? 'белых' : 'чёрных'}`;
+}
+
 export class Controller {
   constructor({ ui, renderer, fx, director, audio, ai, native, settings, statsStore, opts = {} }) {
     this.ui = ui;
@@ -137,6 +194,9 @@ export class Controller {
     this.debug = !!opts.debug;
     this.fast = !!opts.fast;
     this.autoSkip = !!opts.autoSkip;
+    this._now = typeof opts.now === 'function' ? opts.now : now;
+    this.storage = opts.storage || undefined; // autosave storage (default: localStorage)
+    this.autosave = opts.autosave !== false;
 
     this.token = 0;
     this.game = null;
@@ -162,12 +222,30 @@ export class Controller {
     this._undoing = false;
     this._resumeWaiters = [];
     this._intensity = 0;
-    this._quality = settings.quality;
+    /** Effective graphics quality (may be below settings.quality after an adaptive step down). */
+    this.quality = settings.quality || 'high';
+    this._qualitySetting = settings.quality;
+    /** Set by main.js: called with the new settings.quality when the user changes it. */
+    this.onQualitySetting = null;
     this._lang = settings.lang;
     this.startedAt = 0;
     this.mismatches = 0;
     this.errors = [];
     this.movesPlayed = 0;
+    this._skipGuard = null;
+    this._drawOffer = null;
+    this._drawThinking = false;
+    this._drawDecision = null;
+    this._statusKind = '';
+    this._statusTimer = 0;
+    this._lastWarn = null;
+    this._awake = undefined;
+    this._idle = false;
+    this._lastActivity = this._now();
+    this._idleTimer = 0;
+
+    // keep the Director's ЯРОСТЬ model in sync with ours (it spots the meter filling up itself)
+    if (director && director.hypeModel && typeof director.hypeModel === 'object') director.hypeModel = { ...HYPE };
 
     renderer.onTap((e) => this._onTap(e));
     renderer.onSquareTap((sq) => this._onSquareTap(sq));
@@ -233,6 +311,30 @@ export class Controller {
     return new Promise((r) => this._resumeWaiters.push(r));
   }
 
+  /** Is the UI's pause menu really open? (unknown → trust our own flag) */
+  _uiPaused() {
+    try {
+      const p = this.ui.paused;
+      return p === undefined ? true : !!p;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  /**
+   * Waits until the pause menu is closed (F1). Also recovers when the UI closed its pause overlay
+   * without emitting 'resume' (e.g. it was closed by another overlay).
+   */
+  async _waitUnpausedUi(token) {
+    while (token === this.token && this.paused) {
+      if (!this._uiPaused()) {
+        this.onResume();
+        break;
+      }
+      await Promise.race([this._waitUnpaused(), sleep(250)]);
+    }
+  }
+
   _flushWaiters() {
     const w = this._resumeWaiters;
     this._resumeWaiters = [];
@@ -262,9 +364,10 @@ export class Controller {
   }
 
   /**
-   * Awaits a Director promise: shows the «Пропустить» chip while a cinematic is busy, honours
-   * autoSkip (tests), and protects against a promise that never settles (watchdog on ticker time,
-   * so a backgrounded / paused app never trips it).
+   * Awaits a Director promise: shows the «Пропустить» chip once a cinematic has been running for a
+   * while (EAD-22: never on short animations), honours autoSkip (tests), and protects against a
+   * promise that never settles (watchdog on ticker time, so a backgrounded / paused app never
+   * trips it).
    */
   async _cinematic(promise) {
     this._track(promise);
@@ -272,13 +375,19 @@ export class Controller {
     const d = this.director;
     const clock = this.renderer.clock;
     const t0 = now();
+    const chipAfter = this.epic ? SKIP_CHIP_DELAY.epic : SKIP_CHIP_DELAY.classic;
     if (this.autoSkip) this._fire('skip', () => d.busy && d.skip());
     let done = false;
     let poll = 0;
+    let chip = false;
     const tick = () => {
       if (done) return;
       const busy = !!d.busy;
-      hud.setSkippable(busy && now() - t0 > 400);
+      const on = busy && now() - t0 > chipAfter;
+      if (on !== chip) {
+        chip = on;
+        hud.setSkippable(on);
+      }
       if (busy && this.autoSkip) this._fire('skip', () => d.skip());
     };
     poll = setInterval(tick, 120);
@@ -333,6 +442,135 @@ export class Controller {
     else if (typeof d.reset === 'function') this._fire('director.reset', () => d.reset(state));
   }
 
+  /** The HUD fade for big cinematics (EAD-06) is reset at game boundaries (a hook may be cut short). */
+  _resetHudCinematic() {
+    const hud = this.hud;
+    if (!hud) return;
+    if (typeof hud.resetCinematic === 'function') this._fire('hud.resetCinematic', () => hud.resetCinematic());
+    else if (typeof hud.setCinematic === 'function') this._fire('hud.setCinematic', () => hud.setCinematic(false));
+  }
+
+  // =================================================================== lanes (EAD-15)
+  /**
+   * Free screen space above / below the board frame for the Director's banners, captions and the
+   * combo counter: from the UI (hud.lanes()) when it provides them, else measured from the DOM.
+   */
+  syncLanes() {
+    const d = this.director;
+    if (!d || typeof d.setLanes !== 'function' || !this.active) return;
+    let lanes = null;
+    const hud = this.hud;
+    try {
+      if (hud && typeof hud.lanes === 'function') lanes = hud.lanes();
+    } catch (e) {
+      lanes = null;
+    }
+    const valid = (l) => l && typeof l === 'object' && ('top' in l || 'bottom' in l);
+    if (!valid(lanes)) lanes = this._domLanes();
+    if (!valid(lanes)) return;
+    this._fire('director.setLanes', () => d.setLanes({ top: lanes.top || null, bottom: lanes.bottom || null }));
+  }
+
+  /** Lane fallback: between the top HUD panel and the board frame, and the frame and the status chip. */
+  _domLanes() {
+    if (typeof document === 'undefined') return null;
+    try {
+      const fr = this.renderer.frameBounds;
+      if (!fr || !(fr.height > 0)) return null;
+      const scr = document.querySelector('.screen--game');
+      if (!scr) return null;
+      const top = scr.querySelector('.hp--top');
+      const status = scr.querySelector('.status');
+      const out = { top: null, bottom: null };
+      if (top) {
+        const b = top.getBoundingClientRect();
+        const h = fr.y - b.bottom;
+        if (b.height > 0 && h > 0 && b.bottom < fr.y) out.top = { y: b.bottom, h };
+      }
+      if (status) {
+        const b = status.getBoundingClientRect();
+        const y = fr.y + fr.height;
+        const h = b.top - y;
+        if (b.height > 0 && h > 0) out.bottom = { y, h };
+      }
+      return out;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** The #board-slot moved / resized (UI 'board-rect'). */
+  onBoardRect(rect) {
+    if (!this.active || !rect || !(rect.width > 0)) return;
+    this._fire('renderer.setBoardRect', () => this.renderer.setBoardRect(rect));
+    this.syncLanes();
+  }
+
+  // =================================================================== screen wake (F7)
+  /** Keep the display on only while a game is actually being played. */
+  _updateWake() {
+    const on = !!(this.active && !this.paused && !this.appPaused && this.phase !== 'over' && !this._idle);
+    if (on === this._awake) return;
+    this._awake = on;
+    this._fire('keepScreenOn', () => this.native && this.native.keepScreenOn(on));
+  }
+
+  /** Any user input (board taps, HUD buttons): re-arms the screen wake lock after an idle spell. */
+  noteActivity() {
+    this._lastActivity = this._now();
+    if (this._idle) {
+      this._idle = false;
+      this._updateWake();
+    }
+  }
+
+  /** The player has not touched the screen for IDLE_SCREEN_MS on their own turn: let it sleep. */
+  _checkIdle() {
+    if (this.active && this.phase === 'human' && !this._idle && this._now() - this._lastActivity > IDLE_SCREEN_MS) {
+      this._idle = true;
+      this._updateWake();
+    }
+  }
+
+  _startIdleTimer() {
+    if (this._idleTimer) return;
+    this._idleTimer = setInterval(() => this._checkIdle(), 15000);
+    if (this._idleTimer && typeof this._idleTimer.unref === 'function') this._idleTimer.unref();
+  }
+
+  _stopIdleTimer() {
+    if (this._idleTimer) clearInterval(this._idleTimer);
+    this._idleTimer = 0;
+  }
+
+  // =================================================================== autosave (F8)
+  _saveGame() {
+    const g = this.game;
+    if (!this.autosave || !g || !this.active || !this.cfg || !saveableMode(this.mode) || g.result) return;
+    try {
+      writeSave(
+        {
+          cfg: { ...this.cfg, humanColor: this.baseCfg ? this.baseCfg.humanColor : this.cfg.humanColor },
+          humanColor: this.humanColor,
+          game: g,
+          elapsedSec: (Date.now() - this.startedAt) / 1000,
+        },
+        this.storage,
+      );
+    } catch (e) {
+      this._logError('autosave', e);
+    }
+  }
+
+  _dropSave() {
+    if (!this.autosave) return;
+    try {
+      clearSave(this.storage);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
   // =================================================================== players
   _makePlayers() {
     const lang = getLang();
@@ -350,9 +588,12 @@ export class Controller {
         }
         return { name: t('hud.you'), isHuman: true, title, color };
       }
-      const level = Math.min(5, Math.max(1, cfg.level || 3));
+      const level = clampLevel(cfg.levels ? cfg.levels[color] : cfg.level);
       const L = AI_LEVELS[level - 1] || AI_LEVELS[2];
-      const name = (cfg.epic ? L.epicName : L.name)[lang] || (cfg.epic ? L.epicName : L.name).ru;
+      const names = cfg.epic ? L.epicName : L.name;
+      let name = names[lang] || names.ru;
+      // two equal AIs in a demo still get different names: «Белый самурай» vs «Чёрный самурай»
+      if (this.mode === 'demo' && cfg.levels && cfg.levels[1] === cfg.levels[-1]) name = sideNamed(name, color, lang);
       const title = this.mode === 'demo' ? `${colorName(color)} · ${t('hud.aiLevel', { n: level })}` : t('hud.aiLevel', { n: level });
       return { name, isHuman: false, title, level, kanji: L.kanji, power: L.power, color };
     };
@@ -361,11 +602,12 @@ export class Controller {
 
   // =================================================================== game lifecycle
   /**
-   * Start a game. cfg: GameConfig { variantId, mode, humanColor (0 = random), level, epic, giveaway }.
-   * opts.startState: optional engine State to start from (tests / ?pos=); opts.intro=false skips
-   * the VS cinematic.
+   * Start a game. cfg: GameConfig { variantId, mode, humanColor (0 = random), level, epic, giveaway,
+   * levelWhite?, levelBlack? (demo) }. opts.startState: optional engine State to start from
+   * (tests / ?pos=); opts.intro=false skips the VS cinematic; opts.resume: a validated autosave
+   * (readSave()) to continue.
    */
-  async startGame(cfgIn, { startState = null, intro = true } = {}) {
+  async startGame(cfgIn, { startState = null, intro = true, resume = null } = {}) {
     const token = ++this.token;
     this._abortCurrent();
     if (this._inflight.size) {
@@ -383,7 +625,7 @@ export class Controller {
       ...(cfgIn || {}),
     };
     if (!['ai', 'pvp', 'demo'].includes(base.mode)) base.mode = 'ai';
-    base.level = Math.min(5, Math.max(1, Math.round(Number(base.level) || 3)));
+    base.level = clampLevel(base.level);
     base.epic = !!base.epic;
     base.giveaway = !!base.giveaway;
     let variant;
@@ -396,37 +638,62 @@ export class Controller {
     base.variantId = variant.id;
     this.baseCfg = { ...base };
 
+    let game = null;
+    if (resume && resume.game instanceof Game && resume.game.variant.id === variant.id && !resume.game.result) game = resume.game;
+    else resume = null;
     let human = 0;
-    if (base.mode === 'ai') human = base.humanColor === BLACK ? BLACK : base.humanColor === WHITE ? WHITE : Math.random() < 0.5 ? WHITE : BLACK;
-    let game;
-    try {
-      game = new Game(variant.id, { giveaway: base.giveaway }, startState || undefined);
-    } catch (e) {
-      this._logError('start position', e);
-      game = new Game(variant.id, { giveaway: base.giveaway });
+    if (base.mode === 'ai') {
+      if (resume) human = resume.humanColor === BLACK ? BLACK : WHITE;
+      else human = base.humanColor === BLACK ? BLACK : base.humanColor === WHITE ? WHITE : Math.random() < 0.5 ? WHITE : BLACK;
     }
+    if (!game) {
+      try {
+        game = new Game(variant.id, { giveaway: base.giveaway }, startState || undefined);
+      } catch (e) {
+        this._logError('start position', e);
+        game = new Game(variant.id, { giveaway: base.giveaway });
+      }
+    }
+    // a new game abandons the previous unfinished one (the resumed one is saved again below)
+    this._dropSave();
     this.game = game;
     // a game started from a position: the HUD «captured» counters start from the missing pieces
     this._capOffset = { 1: 0, '-1': 0 };
-    if (startState) {
-      const m = materialCount(game.state);
+    try {
+      const m = materialCount(game.startState);
       this._capOffset[1] = Math.max(0, variant.piecesPerSide - (m.bm + m.bk));
       this._capOffset[-1] = Math.max(0, variant.piecesPerSide - (m.wm + m.wk));
+    } catch (e) {
+      /* counters are cosmetic */
     }
     this.cfg = { ...base, humanColor: human, giveaway: game.options.giveaway };
+    if (base.mode === 'demo') this.cfg.levels = demoLevels(base);
     this.mode = base.mode;
     this.humanColor = human;
     this.bottomColor = base.mode === 'ai' ? human : WHITE;
     this.players = this._makePlayers();
-    this.stats = freshStats();
-    this._statsHist = [];
-    this.startedAt = Date.now();
+    if (resume) {
+      const r = replayStats(game.history);
+      this.stats = r.stats;
+      this._statsHist = r.hist;
+      this.startedAt = Date.now() - Math.max(0, Number(resume.elapsedSec) || 0) * 1000;
+    } else {
+      this.stats = freshStats();
+      this._statsHist = [];
+      this.startedAt = Date.now();
+    }
     this.active = true;
     this.paused = false;
     this.phase = 'intro';
     this.sel = null;
     this._intensity = 0;
     this.movesPlayed = 0;
+    this._drawOffer = null;
+    this._drawDecision = null;
+    this._lastWarn = null;
+    this._statusKind = '';
+    this._idle = false;
+    this._lastActivity = this._now();
     this._fire('ai.newGame', () => this.ai.newGame());
 
     const theme = base.epic ? 'epic' : 'classic';
@@ -445,6 +712,7 @@ export class Controller {
     } catch (e) {
       this._logError('hud.setup', e);
     }
+    this._resetHudCinematic();
     this._setTheme(theme);
     const r = this.renderer;
     try {
@@ -453,20 +721,27 @@ export class Controller {
       r.setBoardRect(ui.boardSlotRect());
       r.setPosition(game.state);
       r.highlights.clear(true);
+      if (resume && game.lastMove) r.highlights.setLastMove(game.lastMove.path);
       r.setTurnGlow(game.state.turn);
     } catch (e) {
       this._logError('renderer setup', e);
     }
+    this.syncLanes();
     this._showBoard(true);
     this._directorReset(game.state);
     this._refreshHud();
-    this._fire('keepScreenOn', () => this.native && this.native.keepScreenOn(true));
+    this._updateWake();
+    this._startIdleTimer();
     this._fire('music', () => {
       this.audio.music(theme);
       this.audio.setIntensity(base.epic ? 0.12 : 0);
     });
+    if (resume) {
+      this._updateIntensity(game.lastMove);
+      this._saveGame();
+    }
 
-    if (intro) {
+    if (intro && !resume) {
       const p = this._guard('playGameStart', () => this.director.playGameStart({ variant, players: this.players, epic: base.epic, mode: base.mode, bottomColor: this.bottomColor }));
       await this._cinematic(p);
       if (token !== this.token) return;
@@ -475,16 +750,25 @@ export class Controller {
     this._schedule(token);
   }
 
+  /** Continue an autosaved game (F8): `save` comes from readSave() (validated Game inside). */
+  resumeGame(save) {
+    if (!save || !save.game || !save.cfg) return Promise.resolve(false);
+    return this.startGame({ ...save.cfg }, { resume: save, intro: false }).then(() => true);
+  }
+
   /** Cancel whatever runs now (AI, hint, cinematic, effects). Does not touch the game object. */
   _abortCurrent() {
     this._fire('ai.cancel', () => this.ai.cancel());
     this._hintSeq++;
     this._hintPending = false;
+    this._drawThinking = false;
+    this._skipGuard = null;
     const d = this.director;
     this._fire('director.skip', () => d.busy && d.skip());
     this._fire('fx.clear', () => this.fx && this.fx.clear());
     this._flushWaiters();
     this.sel = null;
+    clearTimeout(this._statusTimer);
     try {
       this.renderer.highlights.clear(true);
     } catch (e) {
@@ -502,10 +786,13 @@ export class Controller {
   /** Leave the game (menu): cancel AI, stop cinematics/effects, hide the board, menu music. */
   stopGame() {
     const wasActive = this.active;
+    // leaving a running game abandons it (a finished game dropped its save already)
+    if (wasActive) this._dropSave();
     this.token++;
     this.active = false;
     this.paused = false;
     this.phase = 'idle';
+    this._drawOffer = null;
     this._abortCurrent();
     // stop any cinematic's further board / screen writes (VS screen, captions …) over the menus
     this._directorReset(null);
@@ -517,7 +804,9 @@ export class Controller {
       /* ignore */
     }
     this._showBoard(false);
-    this._fire('keepScreenOn', () => this.native && this.native.keepScreenOn(false));
+    this._resetHudCinematic();
+    this._stopIdleTimer();
+    this._updateWake();
     if (wasActive || (this.audio && this.audio.currentTrack !== 'menu')) {
       this._fire('music', () => {
         this.audio.setIntensity(0);
@@ -561,19 +850,26 @@ export class Controller {
     this._advanceRetry = 0;
     this.phase = 'human';
     this.sel = null;
+    this._lastActivity = this._now();
     const moves = g.moves;
     this._mustCapture = moves.some((m) => m.captures.length > 0);
     this._selectable = new Set(moves.map((m) => m.path[0]));
+    this._statusKind = '';
     this._paintSelection();
     const turn = g.state.turn;
     this.hud.setThinking(turn, false);
     this.hud.setCanHint(true);
     this.hud.setCanUndo(this._canUndo());
-    this._fire('playTurn', () => this.director.playTurn({ color: turn, isHuman: true, players: this.players }));
+    // MUX-09: a mandatory capture is announced before the player tries a quiet move
+    this._setTurnStatus();
+    const mustCapture = this._mustCapture;
+    this._fire('playTurn', () => this.director.playTurn({ color: turn, isHuman: true, players: this.players, mustCapture }));
     // a single piece that must capture: pick it up right away
     if (this._mustCapture && this._selectable.size === 1 && token === this.token) {
       this._select(moves[0].path[0], { silent: true, auto: true });
     }
+    // a draw offer made while the AI was busy is answered now (RTR-02)
+    if (this._drawOffer && this.mode === 'ai') this._evalDrawOffer(token);
   }
 
   async _aiTurn(token) {
@@ -627,11 +923,12 @@ export class Controller {
   }
 
   /** Plays `move` on the Game, animates `display` (same move, maybe another equivalent route). */
-  async _playMove(move, display, token) {
+  async _playMove(move, display, token, { human = false, tapped = 0 } = {}) {
     const g = this.game;
     this.phase = 'animating';
     this._hintSeq++;
     this._clearInputHighlights();
+    clearTimeout(this._statusTimer);
     this.hud.setCanUndo(false);
     this.hud.setCanHint(false);
     const mover = g.state.turn;
@@ -646,12 +943,16 @@ export class Controller {
       return;
     }
     this.movesPlayed++;
+    this._saveGame();
     const after = g.state;
+    const shown = display || move;
+    // MUX-01: the rest of the player's own tap sequence must not skip their cinematic
+    this._skipGuard = human ? { at: this._now(), last: this._now(), rest: shown.path.slice(Math.max(1, tapped)) } : null;
     const statsForDirector = cloneStats(this.stats);
     statsForDirector.moveNumber = Math.ceil(g.history.length / 2);
     const p = this._guard('playMove', () =>
       this.director.playMove({
-        move: display || move,
+        move: shown,
         before,
         after,
         mover,
@@ -663,39 +964,45 @@ export class Controller {
     this._anim = p;
     await this._cinematic(p);
     if (this._anim === p) this._anim = null;
+    if (human) this._skipGuard = null;
     if (token !== this.token) return;
-    this._applyStats(move, mover);
+    applyMoveStats(this.stats, move, mover, this.game.history.length);
     try {
-      this.renderer.highlights.setLastMove((display || move).path);
+      this.renderer.highlights.setLastMove(shown.path);
     } catch (e) {
       /* ignore */
     }
     this._checkSync('move');
     this._updateIntensity(move);
     this._refreshHud();
+    this._drawWarnings();
   }
 
-  _applyStats(move, mover) {
-    const st = this.stats;
-    const n = move.captures.length;
-    st.moveNumber = Math.ceil(this.game.history.length / 2);
-    if (n) {
-      st.captures[mover] += n;
-      st.piecesLost[-mover] += n;
-      st.maxCombo[mover] = Math.max(st.maxCombo[mover], n);
-      if (st.hype[mover] >= 1) {
-        // this capture was the ULTIMATE: the meter is spent
-        st.hype[mover] = 0;
-        st.ultimates[mover]++;
-      } else {
-        st.hype[mover] = Math.min(1, st.hype[mover] + HYPE_PER_CAPTURE * n + HYPE_COMBO_BONUS * (n - 1));
+  /** MUX-20 / RTR-05: warn before a repetition or a move-limit draw ends the game. */
+  _drawWarnings() {
+    const g = this.game;
+    if (!g || g.result) return;
+    const ply = g.history.length;
+    let msg = null;
+    let key = null;
+    try {
+      if (typeof g.repetitionCount === 'function' && g.repetitionCount() === 2) {
+        key = `rep:${ply}`;
+        msg = text('status.repetitionWarn');
+      } else if (typeof g.drawProgress === 'function') {
+        const dp = g.drawProgress();
+        if (dp && dp.movesLeft > 0 && dp.movesLeft <= 3) {
+          key = `dp:${dp.rule}:${dp.movesLeft}`;
+          msg = text('status.drawSoon', { n: dp.movesLeft, count: dp.movesLeft });
+        }
       }
-      st.hype[-mover] = Math.min(1, st.hype[-mover] + HYPE_PER_LOSS * n);
+    } catch (e) {
+      this._logError('draw warning', e);
+      return;
     }
-    if (move.promotion) {
-      st.kingsMade[mover]++;
-      if (st.hype[mover] < 1) st.hype[mover] = Math.min(1, st.hype[mover] + HYPE_PROMOTION);
-    }
+    if (!msg || key === this._lastWarn) return;
+    this._lastWarn = key;
+    this._fire('hud.toast', () => this.hud.toast(msg, { tone: 'info', epic: this.epic }));
   }
 
   _updateIntensity(move) {
@@ -711,7 +1018,7 @@ export class Controller {
 
   _canUndo() {
     const g = this.game;
-    if (!g || !this.active || this.mode === 'demo' || g.result) return false;
+    if (!g || !this.active || this.mode === 'demo' || g.result || this._drawThinking) return false;
     if (this.phase === 'animating' || this.phase === 'intro' || this.phase === 'over') return false;
     if (this.mode === 'pvp') return g.history.length > 0;
     return g.history.some((h) => h.before.turn === this.humanColor);
@@ -730,10 +1037,41 @@ export class Controller {
       hud.setHype(1, st.hype[1]);
       hud.setHype(-1, st.hype[-1]);
       hud.setCanUndo(this._canUndo());
-      hud.setCanHint(this.phase === 'human' && this.mode !== 'demo');
+      hud.setCanHint(this.phase === 'human' && this.mode !== 'demo' && !this._drawThinking);
     } catch (e) {
       this._logError('hud', e);
     }
+  }
+
+  // =================================================================== status line
+  /** The turn's status text: «Твой ход — бей!» when a capture is mandatory, else the HUD default. */
+  _setTurnStatus() {
+    clearTimeout(this._statusTimer);
+    const kind = this.phase === 'human' && this._mustCapture ? 'capture' : 'turn';
+    if (kind === this._statusKind) return;
+    this._statusKind = kind;
+    try {
+      if (kind === 'capture') this.hud.setStatus(text('status.yourTurnCapture'), { tone: 'alert' });
+      else this.hud.setStatus('');
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  /** An explanation in the status line; it falls back to the turn status after a while. */
+  _explain(msg, tone) {
+    clearTimeout(this._statusTimer);
+    this._statusKind = 'explain';
+    try {
+      this.hud.setStatus(msg, { tone });
+    } catch (e) {
+      /* ignore */
+    }
+    const token = this.token;
+    this._statusTimer = setTimeout(() => {
+      if (token === this.token && this.phase === 'human' && this._statusKind === 'explain') this._setTurnStatus();
+    }, STATUS_RESET_MS);
+    if (this._statusTimer && typeof this._statusTimer.unref === 'function') this._statusTimer.unref();
   }
 
   // =================================================================== consistency
@@ -773,14 +1111,51 @@ export class Controller {
   }
 
   // =================================================================== input
-  _onTap() {
+  /**
+   * Any tap on the canvas: skips a running cinematic (MUX-01: except the taps that still belong
+   * to the player's own move entry — the remaining landing squares of the move just committed,
+   * and anything within SKIP_GRACE_MS of the commit / of such a tap).
+   */
+  _onTap(e) {
     if (!this.active) return;
+    this.noteActivity();
     const d = this.director;
-    if (d.busy) this._fire('director.skip', () => d.skip());
+    if (!d || !d.busy) return;
+    if (this._entryTap(e)) return;
+    this._skipGuard = null;
+    this._fire('director.skip', () => d.skip());
+  }
+
+  /**
+   * Does this tap belong to the move entry that started the running cinematic? The player taps
+   * the remaining landing squares where they were on screen before the camera moved, so a tap
+   * counts when it is on such a square now (e.sq) or near its resting position.
+   */
+  _entryTap(e) {
+    const gd = this._skipGuard;
+    if (!gd) return false;
+    const tNow = this._now();
+    if (tNow - gd.last < SKIP_GRACE_MS) return true;
+    if (!e || tNow - gd.last >= ENTRY_TAP_GAP_MS || !gd.rest.length) return false;
+    const r = this.renderer;
+    const near = (sq) => {
+      if (e.sq === sq) return true;
+      try {
+        const c = r.squareCenter(sq); // world coords = screen coords with the camera at rest
+        return Number.isFinite(e.x) && Math.hypot(e.x - c.x, e.y - c.y) <= 0.75 * r.squareSize;
+      } catch (err) {
+        return false;
+      }
+    };
+    const i = gd.rest.findIndex(near);
+    if (i < 0) return false;
+    gd.rest = gd.rest.slice(i + 1);
+    gd.last = tNow;
+    return true;
   }
 
   _onSquareTap(sq) {
-    if (!this.active || this.phase !== 'human' || this.paused) return;
+    if (!this.active || this.phase !== 'human' || this.paused || this._drawThinking) return;
     try {
       this._handleSquare(sq);
     } catch (e) {
@@ -788,6 +1163,16 @@ export class Controller {
       this.sel = null;
       this._paintSelection();
     }
+  }
+
+  /** The only piece whose capture lands on `sq` first (a tap on a red capture ring), or -1. */
+  _landingOwner(sq) {
+    const froms = new Set();
+    for (const m of this.game.moves) {
+      if (!m.captures.length) continue;
+      for (const p of [m.path].concat(m.alts || [])) if (p[1] === sq) froms.add(p[0]);
+    }
+    return froms.size === 1 ? froms.values().next().value : -1;
   }
 
   _handleSquare(sq) {
@@ -799,7 +1184,11 @@ export class Controller {
     const sel = this.sel;
     if (!sel) {
       if (own && this._selectable.has(sq)) this._select(sq);
-      else if (own || this._mustCapture) this._illegal(sq);
+      else if (!own && this._mustCapture && this._landingOwner(sq) >= 0) {
+        // a tap on a capture landing ring: pick up the capturing piece and take that hop
+        this._select(this._landingOwner(sq), { silent: true });
+        this._handleSquare(sq);
+      } else if (own || this._mustCapture) this._illegal(sq);
       return;
     }
     const prefix = sel.prefix;
@@ -816,13 +1205,13 @@ export class Controller {
     const finals = opts.filter((o) => o.path[o.path.length - 1] === sq);
     const fm = uniqueMoves(finals);
     if (fm.length === 1) {
-      this._commitHuman(fm[0], finals[0].path);
+      this._commitHuman(fm[0], finals[0].path, finals[0].path.length);
       return;
     }
     // 3) tapping the end of the partial path finishes a move that may stop there
     if (k > 1 && sq === prefix[k - 1]) {
       const exact = opts.find((o) => o.path.length === k);
-      if (exact) this._commitHuman(exact.move, exact.path);
+      if (exact) this._commitHuman(exact.move, exact.path, k);
       return;
     }
     // 4) own pieces: reselect / deselect / restart the path
@@ -846,11 +1235,7 @@ export class Controller {
     this.sel = { from: sq, prefix: [sq], auto };
     this._paintSelection();
     if (!silent || this.epic) this._fire('playSelect', () => this.director.playSelect(sq));
-    try {
-      this.hud.setStatus('');
-    } catch (e) {
-      /* ignore */
-    }
+    if (this._statusKind === 'explain') this._setTurnStatus();
   }
 
   _deselect() {
@@ -866,7 +1251,7 @@ export class Controller {
     const distinct = uniqueMoves(opts);
     if (distinct.length === 1) {
       const exact = opts.find((o) => o.path.length === prefix.length);
-      this._commitHuman(distinct[0], exact ? exact.path : opts[0].path);
+      this._commitHuman(distinct[0], exact ? exact.path : opts[0].path, prefix.length);
       return;
     }
     this.sel = { from: this.sel.from, prefix, auto: this.sel.auto };
@@ -874,18 +1259,22 @@ export class Controller {
     this._sfx('click', { pitch: 1 + Math.min(0.5, prefix.length * 0.08) });
   }
 
+  /** Refused tap: shake + a precise explanation (RO-2 / MUX-02 / MUX-16). */
   _illegal(sq) {
     this._fire('playIllegal', () => this.director.playIllegal(sq));
-    if (this._mustCapture) {
-      try {
-        this.hud.setStatus(t('hud.mustCapture'), { tone: 'alert' });
-      } catch (e) {
-        /* ignore */
-      }
+    let reason = null;
+    const sel = this.sel;
+    try {
+      reason = illegalTapReason(this.game.state, this.game.moves, sq, sel && sel.prefix.length === 1 ? sel.from : -1);
+    } catch (e) {
+      reason = this._mustCapture ? 'mustCapture' : null;
     }
+    if (!reason) return;
+    const msg = reason === 'mustCapture' ? text('status.mustCapture', null, ['hud.mustCapture']) : text(`status.${reason}`);
+    this._explain(msg, reason === 'noMovesForPiece' ? 'info' : 'alert');
   }
 
-  async _commitHuman(move, path) {
+  async _commitHuman(move, path, tapped = 0) {
     if (this.phase !== 'human' || !this.game) return;
     const token = this.token;
     const display = routeMove(move, path, this.game.state.size);
@@ -894,9 +1283,19 @@ export class Controller {
       this._hintPending = false;
       this._fire('ai.cancel', () => this.ai.cancel());
     }
-    await this._playMove(move, display, token);
+    await this._playMove(move, display, token, { human: true, tapped });
     if (token !== this.token) return;
     this._schedule(token);
+  }
+
+  /** Every capture landing reachable first (MUX-09: shown as red rings while nothing is selected). */
+  _captureLandings() {
+    const out = [];
+    for (const m of this.game.moves) {
+      if (!m.captures.length) continue;
+      for (const p of [m.path].concat(m.alts || [])) if (!out.includes(p[1])) out.push(p[1]);
+    }
+    return out;
   }
 
   /** Selectable rings / selected piece / targets / partial path for the current input state. */
@@ -905,11 +1304,13 @@ export class Controller {
     const show = this.settings.showMoves !== false;
     const human = this.phase === 'human';
     try {
-      hl.setSelectable(human && show ? Array.from(this._selectable) : []);
+      // (the capture flag is a hint for the renderer to tint forced capturers; older ones ignore it)
+      hl.setSelectable(human && show ? Array.from(this._selectable) : [], { capture: human && this._mustCapture });
       const sel = this.sel;
       if (!human || !sel) {
         hl.setSelected(-1);
-        hl.setTargets([]);
+        if (human && show && this._mustCapture) hl.setTargets(this._captureLandings(), { capture: true });
+        else hl.setTargets([]);
         hl.setPath(null);
         return;
       }
@@ -960,11 +1361,13 @@ export class Controller {
         if (g.undo() && this._statsHist.length) this.stats = this._statsHist.pop();
       }
       this.phase = 'idle';
+      this._drawOffer = null;
       this._resync();
       const last = g.lastMove;
       this.renderer.highlights.setLastMove(last ? last.path : null);
       this._sfx('undo');
       this._updateIntensity(null);
+      this._saveGame();
     } catch (e) {
       this._logError('undo', e);
       this._resync();
@@ -978,7 +1381,7 @@ export class Controller {
 
   async hint() {
     const g = this.game;
-    if (!g || this.phase !== 'human' || this.mode === 'demo' || this._hintPending) return false;
+    if (!g || this.phase !== 'human' || this.mode === 'demo' || this._hintPending || this._drawThinking) return false;
     const token = this.token;
     const seq = ++this._hintSeq;
     this._hintPending = true;
@@ -995,7 +1398,7 @@ export class Controller {
     this._hintPending = false;
     this.hud.setCanHint(true);
     if (!r || !r.path) {
-      this.hud.toast(s('hintNone'));
+      this.hud.toast(text('toast.hintNone', null, ['hud.hintNone']));
       return false;
     }
     try {
@@ -1011,7 +1414,7 @@ export class Controller {
     const g = this.game;
     if (!g || !this.active || g.result) return;
     const p = payload || {};
-    const color = p.color === WHITE || p.color === BLACK ? p.color : this.mode === 'ai' ? this.humanColor : g.state.turn;
+    const color = isColor(p.color) ? p.color : this.mode === 'ai' ? this.humanColor : g.state.turn;
     const token = ++this.token;
     this._abortCurrent();
     try {
@@ -1023,30 +1426,75 @@ export class Controller {
     this._schedule(token);
   }
 
+  /**
+   * Draw offer. pvp: { accepted } from the two-player dialog. vs AI ({ vsAI: true } or mode 'ai'):
+   * the AI answers after a short search (RTR-02) — on the player's turn, so it never interrupts
+   * its own thinking.
+   */
   offerDraw(payload) {
     const g = this.game;
     if (!g || !this.active || g.result) return;
+    const p = payload || {};
     if (this.mode === 'ai') {
-      // the AI accepts only a balanced position after move 20
-      let accept = false;
-      try {
-        const ev = evaluateState(g.state); // White's point of view, 100 = a man
-        accept = g.history.length >= 40 && Math.abs(ev) <= 60;
-      } catch (e) {
-        this._logError('evaluate', e);
-      }
-      if (!accept) {
-        this.hud.toast(s('drawDeclinedAi'), { epic: this.epic });
-        return;
-      }
-      this.hud.toast(s('drawAcceptedAi'));
-    } else if (this.mode === 'pvp') {
-      if (payload && payload.accepted === false) return;
-    } else return;
+      if (this._drawOffer) return; // already being considered
+      this._drawOffer = { ply: g.history.length };
+      if (this.phase === 'human') this._evalDrawOffer(this.token);
+      return;
+    }
+    if (this.mode !== 'pvp' || p.accepted === false) return;
+    this._agreeDraw();
+  }
+
+  _agreeDraw() {
+    const g = this.game;
     const token = ++this.token;
     this._abortCurrent();
     g.agreeDraw();
     this._schedule(token);
+  }
+
+  /** The AI's answer to a draw offer: a ~400 ms level-3 search from its point of view. */
+  async _evalDrawOffer(token) {
+    const g = this.game;
+    if (!this._drawOffer || this._drawThinking || !g || g.result) return;
+    const ply = g.history.length;
+    const aiColor = -this.humanColor;
+    let accept = false;
+    const decided = this._drawDecision;
+    if (Math.ceil(ply / 2) < DRAW_MIN_MOVE) accept = false;
+    else if (decided && decided.ply === ply && decided.game === g) accept = decided.accept;
+    else {
+      this._drawThinking = true;
+      this.hud.setThinking(aiColor, true);
+      this.hud.setCanHint(false);
+      this.hud.setCanUndo(false);
+      let r = null;
+      try {
+        r = await this.ai.think(g.state, { level: 3, timeMs: this.fast ? 80 : 400, historyHashes: g.hashes });
+      } catch (e) {
+        this._logError('draw offer', e);
+      }
+      this._drawThinking = false;
+      if (token !== this.token || this.game !== g || g.history.length !== ply || this.phase !== 'human') {
+        this._drawOffer = null;
+        return; // the position changed meanwhile: the offer lapses
+      }
+      this.hud.setThinking(aiColor, false);
+      this._refreshHud();
+      if (r && Number.isFinite(r.score)) {
+        // search scores are from the side to move's point of view (100 = a man)
+        const aiScore = g.state.turn === aiColor ? r.score : -r.score;
+        accept = aiScore <= DRAW_ACCEPT_MAX;
+      }
+      this._drawDecision = { ply, game: g, accept };
+    }
+    this._drawOffer = null;
+    if (!accept) {
+      this._fire('hud.toast', () => this.hud.toast(text('toast.drawDeclinedAi'), { epic: this.epic }));
+      return;
+    }
+    this._fire('hud.toast', () => this.hud.toast(text('toast.drawAcceptedAi'), { epic: this.epic }));
+    this._agreeDraw();
   }
 
   onPause() {
@@ -1054,11 +1502,22 @@ export class Controller {
     this.paused = true;
     const d = this.director;
     this._fire('director.skip', () => d.busy && d.skip());
+    this._saveGame();
+    this._updateWake();
   }
 
   onResume() {
     this.paused = false;
     this._flushWaiters();
+    this.noteActivity();
+    this._updateWake();
+  }
+
+  /** The whole app went to the background / came back (native pause / resume). */
+  onAppPause(paused) {
+    this.appPaused = !!paused;
+    if (paused) this._saveGame();
+    this._updateWake();
   }
 
   /** Android back: let the UI handle it (pause menu in game, previous screen, overlays). */
@@ -1071,12 +1530,20 @@ export class Controller {
     }
   }
 
+  /** Effective graphics quality: renderer + FX (the UI class is main.js's business). */
+  setQuality(q) {
+    if (!q || q === this.quality) return;
+    this.quality = q;
+    this._fire('renderer.setQuality', () => this.renderer.setQuality(q));
+    this._fire('fx.setQuality', () => this.fx && this.fx.setQuality(q));
+  }
+
   applySettings(st) {
     if (!st) return;
-    if (st.quality && st.quality !== this._quality) {
-      this._quality = st.quality;
-      this._fire('renderer.setQuality', () => this.renderer.setQuality(st.quality));
-      this._fire('fx.setQuality', () => this.fx && this.fx.setQuality(st.quality));
+    if (st.quality && st.quality !== this._qualitySetting) {
+      this._qualitySetting = st.quality;
+      if (typeof this.onQualitySetting === 'function') this._fire('quality', () => this.onQualitySetting(st.quality));
+      else this.setQuality(st.quality);
     }
     this._fire('volumes', () => {
       this.audio.setSfxVolume(st.sfxVolume);
@@ -1092,6 +1559,10 @@ export class Controller {
         Object.assign(this.players[1], fresh[1]);
         Object.assign(this.players[-1], fresh[-1]);
         this._fire('hud.refresh', () => this.hud.refresh());
+        if (this.phase === 'human') {
+          this._statusKind = '';
+          this._setTurnStatus();
+        }
       }
     }
     if (this.active && this.phase === 'human') this._paintSelection();
@@ -1101,8 +1572,10 @@ export class Controller {
   async _finish(token) {
     const g = this.game;
     this.phase = 'over';
+    this._drawOffer = null;
     this._fire('ai.cancel', () => this.ai.cancel());
     this._clearInputHighlights();
+    clearTimeout(this._statusTimer);
     const hud = this.hud;
     try {
       hud.setThinking(1, false);
@@ -1116,23 +1589,15 @@ export class Controller {
     if (this._anim) await Promise.race([this._anim, sleep(3000)]);
     if (token !== this.token) return;
     const result = g.result;
-    // resign / agreement interrupted the game (effects were cleared): re-sync pieces + king auras
-    if (this._checkSync('final') && (result.reason === 'resign' || result.reason === 'agreement')) this._directorReset(g.state);
+    this._dropSave();
+    this._updateWake();
     const humanColor = this.mode === 'ai' ? this.humanColor : 0;
     const winner = result.winner;
     const outcome = !winner ? 'draw' : this.mode === 'ai' ? (winner === this.humanColor ? 'win' : 'loss') : 'win';
-    this._fire('keepScreenOn', () => this.native && this.native.keepScreenOn(false));
-    this._fire('music', () => {
-      this.audio.setIntensity(0);
-      this.audio.music(outcome === 'loss' ? 'defeat' : outcome === 'win' ? 'victory' : null, { fade: 600 });
-    });
-    this._fire('setTurnGlow', () => this.renderer.setTurnGlow(winner || null));
     const finalStats = cloneStats(this.stats);
-    const p = this._guard('playGameOver', () => this.director.playGameOver({ result, humanColor, stats: finalStats, players: this.players }));
-    await this._cinematic(p);
-    if (token !== this.token) return;
 
-    // stats + records (StatsStore counts ai games fully; pvp/demo separately)
+    // stats + records right away (F1): leaving from a pause menu opened at the end cannot lose them
+    // (StatsStore counts ai games fully; pvp/demo separately)
     const me = this.mode === 'ai' ? this.humanColor : winner || WHITE;
     const durationSec = Math.max(0, Math.round((Date.now() - this.startedAt) / 1000));
     const summary = {
@@ -1157,6 +1622,25 @@ export class Controller {
     }
     this.lastSummary = summary;
     this.lastRecords = records;
+
+    // F1: a game that ended under the pause menu (its last move's cinematic was skipped by
+    // opening it) waits until the menu is closed before the finale and the game-over card
+    await this._waitUnpausedUi(token);
+    if (token !== this.token) return;
+
+    // resign / agreement interrupted the game (effects were cleared): re-sync pieces + king auras
+    if (this._checkSync('final') && (result.reason === 'resign' || result.reason === 'agreement')) this._directorReset(g.state);
+    this._fire('music', () => {
+      this.audio.setIntensity(0);
+      this.audio.music(outcome === 'loss' ? 'defeat' : outcome === 'win' ? 'victory' : null, { fade: 600 });
+    });
+    this._fire('setTurnGlow', () => this.renderer.setTurnGlow(winner || null));
+    const p = this._guard('playGameOver', () => this.director.playGameOver({ result, humanColor, stats: finalStats, players: this.players }));
+    await this._cinematic(p);
+    if (token !== this.token) return;
+    await this._waitUnpausedUi(token);
+    if (token !== this.token) return;
+
     let choice = 'menu';
     try {
       choice = await this.ui.showGameOver({
@@ -1186,7 +1670,7 @@ export class Controller {
     const m = findMove(g.moves, path);
     if (!m) return false;
     const token = this.token;
-    await this._commitHuman(m, path);
+    await this._commitHuman(m, path, path.length);
     return token === this.token || true;
   }
 
@@ -1223,6 +1707,9 @@ export class Controller {
       mismatches: this.mismatches,
       errors: this.errors.slice(),
       movesPlayed: this.movesPlayed,
+      quality: this.quality,
+      awake: !!this._awake,
+      levels: this.cfg && this.cfg.levels ? { ...this.cfg.levels } : null,
     };
   }
 }

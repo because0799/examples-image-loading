@@ -397,17 +397,45 @@ function strongMoves(key, n, f) {
   return strong === f ? (n + 1) >> 1 : n >> 1;
 }
 
-// Each endgame rule: key(material, board, geometry) → '' (not applicable) or a string whose first
-// char is the strong side ('w'/'b') where relevant; draw(key, plies, firstMover) → boolean.
+function strongKey(m) {
+  if (m.bm === 0 && m.bk === 1) return 'w';
+  if (m.wm === 0 && m.wk === 1) return 'b';
+  return '';
+}
+
+/**
+ * Endgame draw rules. Each rule:
+ *   key(material, board, geometry) → '' (not applicable) or a string whose first char is the
+ *     strong side ('w'/'b') where relevant; a tracker keeps counting while the key stays the same;
+ *   limit(key) → the limit in moves;
+ *   counts: 'strong' — only the strong side's moves count (draw after its `limit`-th move),
+ *           'each'   — moves of each side (draw after 2 × limit plies);
+ *   detail: the Result.detail code reported when the rule ends the game.
+ */
 const EG_RULES = {
-  // Russian: 3+ kings vs a lone king — the strong side has 15 own moves.
+  // Russian: 3+ kings (extra men allowed) vs a lone king — the strong side has 15 own moves.
   r3v1: {
     key(m) {
-      if (m.bm === 0 && m.bk === 1 && m.wk >= 3) return 'w';
-      if (m.wm === 0 && m.wk === 1 && m.bk >= 3) return 'b';
+      const k = strongKey(m);
+      if (k === 'w' && m.wk >= 3) return k;
+      if (k === 'b' && m.bk >= 3) return k;
       return '';
     },
-    draw: (k, n, f) => strongMoves(k, n, f) >= 15,
+    limit: () => 15,
+    counts: 'strong',
+    detail: 'endgame',
+  },
+  // Pool (APCA): 3+ kings vs a lone king — the strong side must win within 13 own moves.
+  p3v1: {
+    key(m) {
+      const k = strongKey(m);
+      if (k === 'w' && m.wk >= 3) return k;
+      if (k === 'b' && m.bk >= 3) return k;
+      return '';
+    },
+    limit: () => 13,
+    counts: 'strong',
+    detail: 'endgame',
   },
   // Russian: 3 pieces (any) vs a lone king on the main road — 5 own moves of the strong side.
   rRoad: {
@@ -416,7 +444,9 @@ const EG_RULES = {
       if (m.wm === 0 && m.wk === 1 && m.bm + m.bk === 3 && g.mainDiag[loneKingSquare(board, 1)]) return 'b';
       return '';
     },
-    draw: (k, n, f) => strongMoves(k, n, f) >= 5,
+    limit: () => 5,
+    counts: 'strong',
+    detail: 'main-diagonal',
   },
   // Russian: both sides have kings, material unchanged: 2–3 pieces 5 moves, 4–5 → 30, 6–7 → 60.
   rBalance: {
@@ -426,11 +456,12 @@ const EG_RULES = {
       if (t > 7) return '';
       return `t${t}:${m.wm}.${m.wk}.${m.bm}.${m.bk}`;
     },
-    draw(k, n) {
+    limit(k) {
       const t = k.charCodeAt(1) - 48;
-      const limit = t <= 3 ? 5 : t <= 5 ? 30 : 60;
-      return n >= 2 * limit;
+      return t <= 3 ? 5 : t <= 5 ? 30 : 60;
     },
+    counts: 'each',
+    detail: 'endgame',
   },
   // FMJD: 3 pieces incl. a king vs a lone king — 16 moves each.
   f16: {
@@ -439,7 +470,9 @@ const EG_RULES = {
       if (m.wm === 0 && m.wk === 1 && m.bk >= 1 && m.bm + m.bk === 3) return 'b';
       return '';
     },
-    draw: (k, n) => n >= 32,
+    limit: () => 16,
+    counts: 'each',
+    detail: 'endgame',
   },
   // FMJD: ≤2 pieces incl. a king vs a lone king — 5 moves each.
   f5: {
@@ -450,7 +483,9 @@ const EG_RULES = {
       if (m.wm === 0 && m.wk === 1 && m.bk >= 1 && b <= 2) return 'b';
       return '';
     },
-    draw: (k, n) => n >= 10,
+    limit: () => 5,
+    counts: 'each',
+    detail: 'endgame',
   },
   // Brazilian (CBD Codex): 3 pieces incl. a king vs a lone king on the main diagonal — 5 moves each.
   bRoad: {
@@ -459,9 +494,28 @@ const EG_RULES = {
       if (m.wm === 0 && m.wk === 1 && m.bk >= 1 && m.bm + m.bk === 3 && g.mainDiag[loneKingSquare(board, 1)]) return 'b';
       return '';
     },
-    draw: (k, n) => n >= 10,
+    limit: () => 5,
+    counts: 'each',
+    detail: 'main-diagonal',
   },
 };
+
+/** Moves still allowed under an active endgame tracker (0 = the draw is due now). */
+function egMovesLeft(rule, key, n, f) {
+  const limit = rule.limit(key);
+  if (rule.counts === 'strong') return Math.max(0, limit - strongMoves(key, n, f));
+  return Math.max(0, Math.ceil((2 * limit - n) / 2));
+}
+
+function egIsDraw(rule, key, n, f) {
+  const limit = rule.limit(key);
+  return rule.counts === 'strong' ? strongMoves(key, n, f) >= limit : n >= 2 * limit;
+}
+
+/** Result.detail of the variant's no-progress counter rule. */
+function quietDetail(v) {
+  return v.draw.quietProgress === 'forward' ? 'no-progress' : 'kings-only';
+}
 
 const EMPTY_EG = new Map();
 
@@ -488,8 +542,9 @@ function updateEg(v, options, m, board, turn, prev) {
   const rules = activeRules(v, options);
   const len = rules.length;
   if (len === 0) return emptyEg(0);
-  const total = m.wm + m.wk + m.bm + m.bk;
-  if (total > 7) return emptyEg(len);
+  // Fast path: with more than 7 pieces only the "3+ kings vs a lone king" rules can apply, and
+  // only when one side is down to a lone king (the other rules limit the material themselves).
+  if (m.wm + m.wk + m.bm + m.bk > 7 && strongKey(m) === '') return emptyEg(len);
   const g = getGeometry(v);
   const out = new Array(len * 3);
   for (let i = 0; i < len; i++) {
@@ -633,8 +688,9 @@ export function applyMove(state, move) {
 /**
  * Game-theoretic result of the position, or null if the game goes on.
  * Handles: no pieces / no legal moves (inverted in giveaway), Turkish one-piece-each draw,
- * the variant's no-progress (king moves) limit and the endgame move limits.
+ * the endgame move limits and the variant's no-progress (king moves) limit.
  * Threefold repetition / resign / agreement are handled by Game.
+ * Result: { winner, reason, detail, limit?, rule? } — see the codes in index.js.
  */
 export function positionResult(state, moves) {
   const v = getVariant(state.variantId);
@@ -645,23 +701,57 @@ export function positionResult(state, moves) {
   const black = c.bm + c.bk;
   const mine = me === 1 ? white : black;
   const theirs = me === 1 ? black : white;
-  if (mine === 0) return { winner: gw ? me : -me, reason: 'no-pieces' };
-  if (theirs === 0) return { winner: gw ? -me : me, reason: 'no-pieces' };
+  if (mine === 0) return { winner: gw ? me : -me, reason: 'no-pieces', detail: 'no-pieces' };
+  if (theirs === 0) return { winner: gw ? -me : me, reason: 'no-pieces', detail: 'no-pieces' };
   const list = moves || legalMoves(state);
-  if (list.length === 0) return { winner: gw ? me : -me, reason: 'no-moves' };
-  if (!gw && v.draw.oneEach && mine === 1 && theirs === 1) return { winner: 0, reason: 'insufficient' };
-  if (c.quiet >= 2 * v.draw.quietMoves) return { winner: 0, reason: 'move-limit' };
+  if (list.length === 0) return { winner: gw ? me : -me, reason: 'no-moves', detail: 'no-moves' };
+  if (!gw && v.draw.oneEach && mine === 1 && theirs === 1) return { winner: 0, reason: 'insufficient', detail: 'one-each' };
+  // the specific endgame limits first (they are what the player was racing against)
   const rules = activeRules(v, state.options);
   const eg = c.eg;
   if (rules.length && eg.length === rules.length * 3) {
     for (let i = 0; i < rules.length; i++) {
       const k = eg[i * 3];
-      if (k !== '' && EG_RULES[rules[i]].draw(k, eg[i * 3 + 1], eg[i * 3 + 2])) {
-        return { winner: 0, reason: 'move-limit' };
+      const rule = EG_RULES[rules[i]];
+      if (k !== '' && egIsDraw(rule, k, eg[i * 3 + 1], eg[i * 3 + 2])) {
+        return { winner: 0, reason: 'move-limit', detail: rule.detail, limit: rule.limit(k), rule: rules[i] };
       }
     }
   }
+  if (c.quiet >= 2 * v.draw.quietMoves) {
+    return { winner: 0, reason: 'move-limit', detail: quietDetail(v), limit: v.draw.quietMoves, rule: 'quiet' };
+  }
   return null;
+}
+
+/**
+ * The counter-based draw that is closest to ending the game, for a warning in the UI:
+ * { detail, movesLeft, limit, rule } or null when no counter is running. `movesLeft` counts the
+ * moves still allowed before the draw is declared: moves of each side for the no-progress rule
+ * and the 'each' endgame limits; moves of the strong side for the 3+ kings / main-road limits.
+ * movesLeft = 0 means the draw is due in this position. Threefold repetition is not included —
+ * use Game.repetitionCount() for that.
+ */
+export function drawProgress(state) {
+  const v = getVariant(state.variantId);
+  const c = countersOf(state);
+  let best = null;
+  const rules = activeRules(v, state.options);
+  const eg = c.eg;
+  if (rules.length && eg.length === rules.length * 3) {
+    for (let i = 0; i < rules.length; i++) {
+      const k = eg[i * 3];
+      if (k === '') continue;
+      const rule = EG_RULES[rules[i]];
+      const movesLeft = egMovesLeft(rule, k, eg[i * 3 + 1], eg[i * 3 + 2]);
+      if (!best || movesLeft < best.movesLeft) best = { detail: rule.detail, movesLeft, limit: rule.limit(k), rule: rules[i] };
+    }
+  }
+  if (c.quiet > 0) {
+    const movesLeft = Math.max(0, Math.ceil((2 * v.draw.quietMoves - c.quiet) / 2));
+    if (!best || movesLeft < best.movesLeft) best = { detail: quietDetail(v), movesLeft, limit: v.draw.quietMoves, rule: 'quiet' };
+  }
+  return best;
 }
 
 /** Piece counts of a state: { wm, wk, bm, bk } (white/black men/kings). */

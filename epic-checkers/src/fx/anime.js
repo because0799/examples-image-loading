@@ -574,6 +574,52 @@ function kanjiNow(fx, text, x, y, o, style, size, color) {
     px = Math.max(hw + 6, Math.min(scr.width - hw - 6, px));
   }
   root.position.set(px, py);
+  // world kanji: keep the glyph inside the safe screen area (between the HUD panels) every frame,
+  // even while the camera keeps moving (EAD-08)
+  const clampRect = o.clamp === false ? null : o.clampRect || fx.safeRect || null;
+  const halfW = tex.fx.textWidth * 0.5 + size * 0.12;
+  const halfH = size * 0.62;
+  const anchorX = px;
+  const anchorY = py;
+  const keepInside = (k) => {
+    if (screen) {
+      if (!clampRect) return;
+      const hw = Math.min(scr.width * 0.49, halfW * k);
+      const hh = halfH * k;
+      root.x = Math.max(clampRect.x + hw + 4, Math.min(clampRect.x + clampRect.width - hw - 4, anchorX));
+      root.y = Math.max(clampRect.y + hh + 4, Math.min(clampRect.y + clampRect.height - hh - 4, anchorY));
+      return;
+    }
+    const R = clampRect || { x: 0, y: 0, width: scr.width, height: scr.height };
+    const z = fx.zoom;
+    const q = fx._w2s(anchorX, anchorY, { x: 0, y: 0 });
+    const hw = Math.min(R.width * 0.49, halfW * k * z);
+    const hh = Math.min(R.height * 0.49, halfH * k * z);
+    let cx = Math.max(R.x + hw + 4, Math.min(R.x + R.width - hw - 4, q.x));
+    let cy = Math.max(R.y + hh + 4, Math.min(R.y + R.height - hh - 4, q.y));
+    // keep clear of another piece of lettering on screen (e.g. the combo counter on the board)
+    const A = typeof o.avoid === 'function' ? o.avoid() : null;
+    if (A && cx + hw > A.x && cx - hw < A.x + A.width && cy + hh > A.y && cy - hh < A.y + A.height) {
+      const right = A.x + A.width + hw + 4;
+      const left = A.x - hw - 4;
+      const below = A.y + A.height + hh + 4;
+      const opts = [
+        { x: right, y: cy, d: Math.abs(right - cx), ok: right + hw <= R.x + R.width },
+        { x: left, y: cy, d: Math.abs(left - cx), ok: left - hw >= R.x },
+        { x: cx, y: below, d: Math.abs(below - cy), ok: below + hh <= R.y + R.height },
+      ].filter((c) => c.ok);
+      if (opts.length) {
+        opts.sort((a, b) => a.d - b.d);
+        cx = opts[0].x;
+        cy = opts[0].y;
+      }
+    }
+    if (cx !== q.x || cy !== q.y) {
+      const w = fx._s2w(cx, cy, { x: 0, y: 0 });
+      root.position.set(w.x, w.y);
+    } else root.position.set(anchorX, anchorY);
+  };
+  keepInside(1);
   const rot0 = o.rotation != null ? o.rotation : epic ? (Math.random() - 0.5) * 0.28 : 0;
   const skew = epic ? -0.13 : 0;
   inner.rotation = rot0;
@@ -604,34 +650,58 @@ function kanjiNow(fx, text, x, y, o, style, size, color) {
     burstG.alpha = 0;
   }
   const exit = o.exit || (epic ? (Array.from(text)[0] === '斬' ? 'slice' : 'shatter') : 'fade');
-  const exitDur = epic ? 260 : 300;
+  const exitDur = epic ? (exit === 'shatter' ? 180 : 260) : 300;
   const exitStart = dur - exitDur;
   let exited = false;
   let pieces = null;
   let halves = null;
   let cutFlare = null;
+  let breakFlash = null;
   const startExit = () => {
     exited = true;
     if (exit === 'shatter') {
+      // irregular glass shards cut along random lines through the glyph centre (EAD-09): each
+      // shard carries the glyph texture plus an additive copy in the kanji colour; a white flash
+      // and a spray of sparks mark the break
       main.visible = false;
+      if (disc) disc.visible = false;
       pieces = [];
-      const cols = Math.max(3, Math.min(7, Math.round(tw / (th * 0.5))));
-      const rows = 2;
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const fw = tw / cols;
-          const fh = th / rows;
-          const sub = new Texture({ source: tex.source, frame: new Rectangle(c * fw, r * fh, fw, fh) });
-          e.cleanup.push(() => sub.destroy(false));
-          const s = fx._sprite(sub, inner);
-          const lx = c * fw + fw / 2 - tw / 2;
-          const ly = r * fh + fh / 2 - th / 2;
-          s.position.set(lx, ly);
-          const d = Math.hypot(lx, ly) || 1;
-          const sp = size * rand(2.5, 6);
-          pieces.push({ s, vx: (lx / d) * sp + rand(-1, 1) * size, vy: (ly / d) * sp - size * rand(0.5, 2.5), vr: rand(-7, 7) });
+      const rect = [-tw / 2, -th / 2, tw / 2, -th / 2, tw / 2, th / 2, -tw / 2, th / 2];
+      const K = 7 + ((Math.random() * 4) | 0);
+      const ox = rand(-0.08, 0.08) * tw;
+      const oy = rand(-0.12, 0.12) * th;
+      const a0 = Math.random() * TAU;
+      const angs = [];
+      for (let i = 0; i < K; i++) angs.push(a0 + ((i + rand(-0.32, 0.32)) / K) * TAU);
+      for (let i = 0; i < K; i++) {
+        const a = angs[i];
+        const b = i + 1 < K ? angs[i + 1] : angs[0] + TAU;
+        // wedge between rays a and b from (ox, oy): two half-planes through that point
+        const moved = [];
+        for (let j = 0; j < rect.length; j += 2) moved.push(rect[j] - ox, rect[j + 1] - oy);
+        let poly = clipHalf(moved, -Math.sin(a), Math.cos(a));
+        if (poly.length >= 6) poly = clipHalf(poly, Math.sin(b), -Math.cos(b));
+        if (poly.length < 6) continue;
+        for (let j = 0; j < poly.length; j += 2) {
+          poly[j] += ox;
+          poly[j + 1] += oy;
         }
+        const m = meshFromPoly(tex, poly, tw, th);
+        inner.addChild(m);
+        const glow = meshFromPoly(tex, poly, tw, th);
+        glow.blendMode = 'add';
+        glow.tint = color;
+        inner.addChild(glow);
+        const mid = (a + b) / 2;
+        const sp = size * rand(3.2, 6.5);
+        pieces.push({ m, glow, vx: Math.cos(mid) * sp, vy: Math.sin(mid) * sp - size * rand(0.6, 2), vr: rand(-6, 6), x: 0, y: 0, r: 0 });
       }
+      breakFlash = fx._sprite(fx.textures.frame('dot'), inner);
+      breakFlash.blendMode = 'add';
+      breakFlash.scale.set((Math.max(tw, th) * 0.9) / 64);
+      breakFlash.alpha = 1;
+      const wp = screen ? root.position : root.position;
+      fx.emit('spark', wp.x, wp.y, { count: 12, color: mixHex(color, 0xffffff, 0.4), speed: 1.1, screen, realtime: e.realtime });
     } else if (exit === 'slice') {
       main.visible = false;
       const a = o.sliceAngle != null ? o.sliceAngle : -0.32;
@@ -674,6 +744,7 @@ function kanjiNow(fx, text, x, y, o, style, size, color) {
       s = 1 + 0.05 * clamp01((t - 230) / Math.max(1, exitStart - 230));
     }
     inner.scale.set(s);
+    if (!screen || clampRect) keepInside(Math.min(1.25, s));
     inner.rotation = rot0 + (epic && t < 90 ? 0.22 * (1 - t / 90) * Math.sign(rot0 || 1) : 0);
     // shake (stepped ~30 Hz for a hand-drawn jitter)
     if (epic) {
@@ -710,12 +781,18 @@ function kanjiNow(fx, text, x, y, o, style, size, color) {
       const sdt = dt / 1000;
       if (pieces) {
         for (const p of pieces) {
-          p.vy += size * 9 * sdt;
-          p.s.x += p.vx * sdt;
-          p.s.y += p.vy * sdt;
-          p.s.rotation += p.vr * sdt;
-          p.s.alpha = 1 - Math.pow(ke, 1.3);
+          p.vy += size * 14 * sdt;
+          p.x += p.vx * sdt;
+          p.y += p.vy * sdt;
+          p.r += p.vr * sdt;
+          p.m.position.set(p.x, p.y);
+          p.m.rotation = p.r;
+          p.m.alpha = 1 - Math.pow(ke, 1.4);
+          p.glow.position.set(p.x, p.y);
+          p.glow.rotation = p.r;
+          p.glow.alpha = 0.6 * (1 - ke);
         }
+        if (breakFlash) breakFlash.alpha = Math.max(0, 1 - ke * 3.5);
       } else if (halves) {
         const d = Ease.outCubic(ke) * size * 0.9;
         for (const hm of halves) {
@@ -960,11 +1037,30 @@ export function cutIn(fx, o = {}) {
   const pairs = [];
   if (o.title) pairs.push([ts, o.title]);
   if (o.subtitle) pairs.push([ss, o.subtitle]);
-  return withFonts(fx, pairs, () => cutInNow(fx, o, { classic, side, pc, color, bh, ts, ss }));
+  let gs = null;
+  if (o.tag) {
+    gs = subStyle(fx, Math.round(Math.max(13, bh * 0.1)), EPIC.gold, variant);
+    pairs.push([gs, o.tag]);
+  }
+  return withFonts(fx, pairs, () => cutInNow(fx, o, { classic, side, pc, color, bh, ts, ss, gs }));
+}
+
+/** Break a subtitle into ≤ 2 balanced lines when one line would shrink below ~85 %. */
+function splitSub(style, text, maxW) {
+  const one = measureText(style, text);
+  if (one <= maxW * 1.15 || !text.includes(' ')) return [text];
+  const words = text.split(' ');
+  let best = null;
+  for (let i = 1; i < words.length; i++) {
+    const L = [words.slice(0, i).join(' '), words.slice(i).join(' ')];
+    const m = Math.max(...L.map((l) => measureText(style, l)));
+    if (!best || m < best.m) best = { m, lines: L };
+  }
+  return best.lines;
 }
 
 function cutInNow(fx, o, P) {
-  const { classic, side, pc, color, bh, ts, ss } = P;
+  const { classic, side, pc, color, bh, ts, ss, gs } = P;
   const T = fx.textures;
   const scr = fx.renderer.screen;
   const W = scr.width;
@@ -1052,18 +1148,39 @@ function cutInNow(fx, o, P) {
   }
   const textBox = fx._box(band, 'cutin-text');
   const tx0 = sgn * W * 0.13;
-  const title = o.title ? makeTitle(fx, o.title, ts, W * 0.68, textBox, e, 0.8, bh * (o.subtitle ? 0.66 : 0.82)) : null;
-  let sub = null;
+  // subtitle: wrap to ≤ 2 lines first, never shrink below 13 CSS px (EAD-10)
+  let subs = [];
   let sScale = 1;
+  const subMaxW = W * 0.64;
   if (o.subtitle) {
-    sub = fx._textSprite(o.subtitle, ss, textBox, e);
-    sScale = Math.min(1, (W * 0.64) / sub.texture.fx.textWidth);
-    sub.scale.set(sScale);
+    const lines = splitSub(ss, o.subtitle, subMaxW);
+    subs = lines.map((l) => fx._textSprite(l, ss, textBox, e));
+    const wMax = Math.max(...subs.map((sp) => sp.texture.fx.textWidth));
+    sScale = Math.max(Math.min(1, 13 / ss.size), Math.min(1, subMaxW / wMax));
+    for (const sp of subs) sp.scale.set(sScale);
   }
-  const subH = sub ? ss.size * sScale * 1.25 : 0;
+  const subLineH = ss.size * sScale * 1.12;
+  const subH = subs.length ? subLineH * subs.length + ss.size * sScale * 0.15 : 0;
+  const title = o.title ? makeTitle(fx, o.title, ts, W * 0.68, textBox, e, 0.8, bh * (subs.length ? (subs.length > 1 ? 0.56 : 0.66) : 0.82)) : null;
   const tH = title ? title.height : 0;
   const ty = -subH * 0.5;
   const sy = ty + tH / 2 + subH * 0.5;
+  const sub = subs.length ? subs : null;
+  // small gold tag plate above the band («УЛЬТА · ЯРОСТЬ 100%»)
+  let tag = null;
+  if (o.tag && gs) {
+    tag = fx._box(band, 'cutin-tag');
+    const tsp = fx._textSprite(o.tag, gs, null, e);
+    const tw2 = tsp.texture.fx.textWidth;
+    const th2 = gs.size * 1.5;
+    const pw = tw2 + gs.size * 1.6;
+    const g = new Graphics();
+    g.poly([-pw / 2 + th2 * 0.3, -th2 / 2, pw / 2 + th2 * 0.3, -th2 / 2, pw / 2 - th2 * 0.3, th2 / 2, -pw / 2 - th2 * 0.3, th2 / 2], true).fill({ color: 0x05030c, alpha: 0.92 });
+    g.poly([-pw / 2 + th2 * 0.3, -th2 / 2, pw / 2 + th2 * 0.3, -th2 / 2, pw / 2 - th2 * 0.3, th2 / 2, -pw / 2 - th2 * 0.3, th2 / 2], true).stroke({ width: 2, color: EPIC.gold, alpha: 1 });
+    tag.addChild(g, tsp);
+    tag.position.set(tx0 + sgn * W * 0.06, -bh / 2 - th2 * 0.15);
+    tag.alpha = 0;
+  }
   const inDur = classic ? 320 : 170;
   const exitDur = classic ? 320 : 230;
   const exitStart = dur - exitDur;
@@ -1120,9 +1237,16 @@ function cutInNow(fx, o, P) {
     }
     if (sub) {
       const sk = clamp01((t - (classic ? 320 : 220)) / 260);
-      sub.alpha = sk * (1 - ke);
-      sub.position.set(tx0 - sgn * (1 - Ease.outCubic(sk)) * W * 0.18, sy);
-      if (!classic) sub.skew.x = -0.12;
+      sub.forEach((sp, i) => {
+        sp.alpha = sk * (1 - ke);
+        sp.position.set(tx0 - sgn * (1 - Ease.outCubic(sk)) * W * 0.18, sy + (i - (sub.length - 1) / 2) * subLineH);
+        if (!classic) sp.skew.x = -0.12;
+      });
+    }
+    if (tag) {
+      const gk = clamp01((t - 90) / 200);
+      tag.alpha = gk * (1 - ke);
+      tag.scale.set(0.7 + 0.3 * Ease.outBack(gk));
     }
     for (const l of edges) if (l._main) l.alpha = 0.85 + 0.15 * Math.sin(t * 0.04);
   };
@@ -1147,8 +1271,12 @@ function tierColor(n) {
 }
 
 /**
- * Fighting-game combo counter («КОМБО ×3!» / "3 HIT COMBO!"). Each call punches the number in
+ * Fighting-game combo counter («КОМБО ×3» / "3 HIT COMBO!"). Each call punches the number in
  * bigger; the counter hides `hold` ms after the last call. Resolves when it has hidden.
+ * Placement: by default inside the top-left / top-right corner of the board frame (`side`).
+ * o.at = { x, y } puts it at a screen point instead (x = the outer edge on `side`, y = the vertical
+ * centre of the block) and o.fit = max block height (px), e.g. a free lane above / below the board.
+ * Russian reads «КОМБО» above «×3»; English "3" above "HIT COMBO!".
  */
 export function comboCounter(fx, n, o = {}) {
   const scr = fx.renderer.screen;
@@ -1160,8 +1288,8 @@ export function comboCounter(fx, n, o = {}) {
   const ls = comboLabelStyle(fx, labSize, color);
   const ru = fx.lang !== 'en';
   const numText = ru ? `×${n}` : `${n}`;
-  const label = o.label || (ru ? 'КОМБО!' : 'HIT COMBO!');
-  return withFonts(fx, [[ns, numText], [ls, label]], () => comboNow(fx, n, o, { ns, ls, numText, label, color, numSize }));
+  const label = o.label || (ru ? 'КОМБО' : 'HIT COMBO!');
+  return withFonts(fx, [[ns, numText], [ls, label]], () => comboNow(fx, n, o, { ns, ls, numText, label, color, numSize, labSize, above: ru }));
 }
 
 function comboNow(fx, n, o, P) {
@@ -1173,12 +1301,23 @@ function comboNow(fx, n, o, P) {
   if (!C || C.dead) {
     const fr = fx.renderer.frameBounds;
     const root = fx._box(fx.c.screenUI, 'combo');
-    const x0 = side === 'left' ? Math.max(10, fr.x + 4) : Math.min(W - 10, fr.x + fr.width - 4);
-    const y0 = fr.height > 0 ? fr.y + Math.min(fr.height * 0.16, 90) : scr.height * 0.25;
+    let x0;
+    let y0;
+    if (o.at) {
+      x0 = o.at.x;
+      y0 = o.at.y;
+    } else {
+      x0 = side === 'left' ? Math.max(10, fr.x + 4) : Math.min(W - 10, fr.x + fr.width - 4);
+      y0 = fr.height > 0 ? fr.y + Math.min(fr.height * 0.16, 90) : scr.height * 0.25;
+    }
     root.position.set(x0, y0);
     C = fx.combo = {
       root,
       x0,
+      y0,
+      fit: o.fit || 0,
+      centred: !!o.at,
+      side,
       sgn,
       num: null,
       numFlash: null,
@@ -1240,8 +1379,15 @@ function comboNow(fx, n, o, P) {
   C.color = P.color;
   C.texW = tex.fx.textWidth;
   C.numSize = P.numSize;
+  C.labSize = P.labSize;
+  C.above = !!P.above;
+  // block extents (relative to the number's centre line) → centre offset and fit scale
+  const top = C.above ? -(P.numSize * 0.62 * C.base + P.labSize * 0.6) : -P.numSize * 0.42 * C.base;
+  const bottom = C.above ? P.numSize * 0.42 * C.base : P.numSize * 0.62 * C.base + P.labSize * 0.6;
+  C.mid = (top + bottom) / 2;
+  C.k = C.fit > 0 ? Math.min(1, C.fit / (bottom - top)) : 1;
   if (fx.epic) {
-    const cx = C.root.x + C.sgn * C.texW * 0.5 * C.base;
+    const cx = C.root.x + C.sgn * C.texW * 0.5 * C.base * (C.k || 1);
     fx.emit('spark', cx, C.root.y, { screen: true, realtime: true, count: 16 + n * 3, color: P.color, speed: 0.9 });
   }
   return new Promise((r) => C.waiters.push(r));
@@ -1268,7 +1414,10 @@ function comboUpdate(fx, C, dt) {
   const punch = epic ? 1 + 0.95 * (1 - Ease.outBack(pk)) : 1 + 0.25 * (1 - Ease.outCubic(pk));
   const s = C.base * punch;
   const amp = epic ? C.numSize * 0.07 * Math.max(0, 1 - C.since / 320) : 0;
-  C.root.position.set(x + (Math.random() - 0.5) * amp, C.root.y);
+  const k = C.k || 1;
+  C.root.scale.set(k);
+  const y = C.centred ? C.y0 - (C.mid || 0) * k : C.y0;
+  C.root.position.set(x + (Math.random() - 0.5) * amp * k, y);
   C.root.alpha = alpha;
   C.num.scale.set(s);
   C.num.skew.x = epic ? -0.14 : 0;
@@ -1276,7 +1425,7 @@ function comboUpdate(fx, C, dt) {
   C.numFlash.skew.x = C.num.skew.x;
   C.numFlash.alpha = epic ? Math.max(0, 1 - C.since / 170) : 0;
   const w = C.texW * C.base;
-  C.label.position.set(sgn * (w * 0.06), C.numSize * 0.62 * C.base);
+  C.label.position.set(sgn * (w * 0.06), (C.above ? -1 : 1) * C.numSize * 0.62 * C.base);
   C.label.skew.x = epic ? -0.14 : 0;
   C.label.scale.set(Math.min(1.15, 0.9 + 0.05 * C.n));
   // burning counter at high combos
@@ -1284,7 +1433,7 @@ function comboUpdate(fx, C, dt) {
     C.emitAcc += (dt / 1000) * 14 * fx.q.mul;
     while (C.emitAcc >= 1) {
       C.emitAcc -= 1;
-      fx.emit('embers', C.root.x + sgn * Math.random() * w, C.root.y + C.numSize * 0.3, {
+      fx.emit('embers', C.root.x + sgn * Math.random() * w * k, C.root.y + C.numSize * 0.3 * k, {
         screen: true,
         realtime: true,
         count: 1 / fx.q.mul,

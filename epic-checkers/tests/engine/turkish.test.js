@@ -115,15 +115,15 @@ test('turkish: a man on the last row keeps moving sideways (only as a king after
 });
 
 test('turkish: one piece each is a draw', () => {
-  assert.deepEqual(E.positionResult(place(T, 1, { W: ['a1'], b: ['h7'] })), { winner: 0, reason: 'insufficient' });
-  assert.deepEqual(E.positionResult(place(T, -1, { w: ['a2'], B: ['h7'] })), { winner: 0, reason: 'insufficient' });
+  assert.deepEqual(E.positionResult(place(T, 1, { W: ['a1'], b: ['h7'] })), { winner: 0, reason: 'insufficient', detail: 'one-each' });
+  assert.deepEqual(E.positionResult(place(T, -1, { w: ['a2'], B: ['h7'] })), { winner: 0, reason: 'insufficient', detail: 'one-each' });
   // not in giveaway, and not with two pieces on one side
   assert.equal(E.positionResult(place(T, 1, { W: ['a1'], b: ['h7'] }, { giveaway: true })), null);
   assert.equal(E.positionResult(place(T, 1, { W: ['a1', 'b1'], b: ['h7'] })), null);
   // capturing down to one-each ends the game immediately
   const s = place(T, 1, { W: ['a1'], b: ['a4', 'h7'] });
   const after = E.applyMove(s, E.legalMoves(s)[0]);
-  assert.deepEqual(E.positionResult(after), { winner: 0, reason: 'insufficient' });
+  assert.deepEqual(E.positionResult(after), { winner: 0, reason: 'insufficient', detail: 'one-each' });
 });
 
 test('turkish: sideways man moves are not progress for the no-progress (50-move) rule', () => {
@@ -136,7 +136,7 @@ test('turkish: sideways man moves are not progress for the no-progress (50-move)
   const late = place(T, 1, { w: ['a2', 'c2'], b: ['h7', 'f7'] }, { counters: { quiet: 99 } });
   assert.equal(E.positionResult(late), null);
   const end = E.applyMove(late, mv(late, 'a2-b2'));
-  assert.deepEqual(E.positionResult(end), { winner: 0, reason: 'move-limit' });
+  assert.deepEqual(E.positionResult(end), { winner: 0, reason: 'move-limit', detail: 'no-progress', limit: 50, rule: 'quiet' });
 });
 
 // ---- TÜDAF rulebook examples -----------------------------------------------------------------

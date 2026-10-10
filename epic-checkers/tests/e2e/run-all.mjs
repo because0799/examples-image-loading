@@ -2,7 +2,7 @@
 // Runs every end-to-end script against the current dist/www build and prints a summary.
 //
 //   node tests/e2e/run-all.mjs            full suite (demo games for every variant: ~15 min)
-//   node tests/e2e/run-all.mjs --quick    flow + pvp + robust + 3 demo games
+//   node tests/e2e/run-all.mjs --quick    flow + pvp + robust + controller QA fixes + 3 demo games
 //
 // Build first: node tools/build-web.mjs   (npm run e2e does both)
 
@@ -18,6 +18,7 @@ const suites = [
   ['flow.mjs', '--epic', '0'],
   ['pvp.mjs'],
   ['robust.mjs'],
+  ['controller-e2e.mjs'],
   quick
     ? ['demo-all.mjs', '--variants', 'russian,turkish,international', '--themes', 'epic', '--giveaway', 'none']
     : ['demo-all.mjs'],

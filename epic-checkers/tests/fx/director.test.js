@@ -380,3 +380,138 @@ test('game start / game over / turn resolve and leave the board intact', async (
     assert.equal(d.busy, false);
   }
 });
+
+// ---------------------------------------------------------------- controller contract (lanes, hooks, turns, hype)
+const TRIPLE = 'w:.b.....b/......../...b.b../......../.b....../w......./......../....w.w.';
+
+function tripleMove() {
+  const before = stateFromString('russian', TRIPLE);
+  const move = legalMoves(before).find((m) => m.path.join('-') === '40-26-12-30');
+  return { before, move, after: applyMove(before, move) };
+}
+
+test('hooks: impact(ms) on every impact frame, cinematic(true/false) balanced around big moments; null hooks are fine', async () => {
+  const { r, d } = setup('russian', 'epic');
+  const log = [];
+  d.hooks.impact = (ms) => log.push(['impact', ms]);
+  d.hooks.cinematic = (on) => log.push(['cine', on]);
+  const { before, move, after } = tripleMove();
+  r.setPosition(before);
+  d.syncPosition(before);
+  const res = await drive(r, d.playMove({ move, before, after, mover: 1, moverIsHuman: true, names: NAMES, stats: { hype: { 1: 1, '-1': 0 } } }));
+  assert.ok(res.finished);
+  const impacts = log.filter((x) => x[0] === 'impact');
+  assert.ok(impacts.length >= 2, `impacts: ${JSON.stringify(log)}`);
+  for (const [, ms] of impacts) assert.ok(ms > 0 && ms <= 200);
+  const cine = log.filter((x) => x[0] === 'cine').map((x) => x[1]);
+  assert.deepEqual(cine, [true, false], 'one HUD fade around the ULTIMATE');
+  // game start and game over too
+  log.length = 0;
+  await drive(r, d.playGameStart({ variant: VARIANTS[0], players: NAMES, epic: true, bottomColor: 1 }));
+  await drive(r, d.playGameOver({ result: { winner: 1, reason: 'no-pieces' }, humanColor: 1, stats: null, players: NAMES }));
+  assert.deepEqual(log.filter((x) => x[0] === 'cine').map((x) => x[1]), [true, false, true, false]);
+  // hooks that throw never break a cinematic
+  d.hooks.impact = () => {
+    throw new Error('ui bug');
+  };
+  d.hooks.cinematic = null;
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    r.setPosition(before);
+    d.syncPosition(before);
+    const res2 = await drive(r, d.playMove({ move, before, after, mover: 1, moverIsHuman: true, names: NAMES, stats: null }));
+    assert.ok(res2.finished);
+    assert.deepEqual(boardDiff(r, after), []);
+  } finally {
+    console.error = orig;
+  }
+});
+
+test('setLanes() stores the lanes, drops tiny ones, and gives FX a HUD-free rect', () => {
+  const { d, fx } = setup('russian', 'epic');
+  d.setLanes({ top: { y: 90, h: 100 }, bottom: { y: 560, h: 30 } });
+  assert.deepEqual(d.lanes.top, { y: 90, h: 100 });
+  assert.ok(d._stage.lane('top'));
+  assert.equal(d._stage.lane('bottom'), null, 'a 30 px lane is too small');
+  assert.ok(fx.safeRect && fx.safeRect.y === 90 && fx.safeRect.height > 0);
+  d.setLanes({ top: null, bottom: null });
+  assert.equal(d._stage.lane('top'), null);
+});
+
+test('the turn banner only shows when it tells something (EAD-17)', async () => {
+  const { r, d } = setup('russian', 'epic');
+  const shown = [];
+  const orig = d._banner.bind(d);
+  d._banner = (color, text, o) => {
+    shown.push(text);
+    return orig(color, text, o);
+  };
+  const st = createInitialState('russian');
+  r.setPosition(st);
+  d.syncPosition(st);
+  await drive(r, d.playTurn({ color: 1, isHuman: true, players: NAMES }));
+  assert.equal(shown.length, 1, 'first turn of the game');
+  // a quiet move → no banner for the next turn
+  const quiet = legalMoves(st)[0];
+  const a1 = applyMove(st, quiet);
+  await drive(r, d.playMove({ move: quiet, before: st, after: a1, mover: 1, moverIsHuman: true, names: NAMES, stats: null }));
+  await drive(r, d.playTurn({ color: -1, isHuman: false, players: NAMES }));
+  assert.equal(shown.length, 1, 'no banner after a quiet move');
+  // after a capture → banner
+  const { before, move, after } = tripleMove();
+  r.setPosition(before);
+  d.syncPosition(before);
+  await drive(r, d.playMove({ move, before, after, mover: 1, moverIsHuman: true, names: NAMES, stats: null }));
+  const t = await drive(r, d.playTurn({ color: -1, isHuman: false, players: NAMES }));
+  assert.equal(shown.length, 2, 'banner after a capture');
+  assert.equal(shown[1], 'ХОД СОПЕРНИКА');
+  assert.ok(t.t < 1600, 'resolves soon after the banner appears, not when it ends');
+  // mandatory capture is announced when the controller says so
+  await drive(r, d.playTurn({ color: 1, isHuman: true, players: NAMES, mustCapture: true }));
+  assert.equal(shown[2], 'ОБЯЗАТЕЛЬНЫЙ БОЙ!');
+});
+
+test('ЯРОСТЬ 100%: playMove fires playHypeReady when the meter crosses 1; repeated calls are ignored', async () => {
+  const { r, d } = setup('russian', 'epic');
+  const calls = [];
+  const orig = d.playHypeReady.bind(d);
+  d.playHypeReady = (c) => {
+    calls.push(c);
+    return orig(c);
+  };
+  const before = stateFromString('russian', 'w:.b.b.b.b/b.b.b.b./......../......../...b..../..w...../.w.w.w.w/w.w.w.w.');
+  const move = legalMoves(before).find((m) => m.captures.length === 1);
+  const after = applyMove(before, move);
+  r.setPosition(before);
+  d.syncPosition(before);
+  await drive(r, d.playMove({ move, before, after, mover: 1, moverIsHuman: true, names: NAMES, stats: { hype: { 1: 0.85, '-1': 0.2 } } }));
+  assert.deepEqual(calls, [1]);
+  assert.equal(await d.playHypeReady(1), false, 'already celebrated while the meter stays full');
+  // the meter was spent (ULTIMATE) → the next fill is celebrated again
+  r.setPosition(before);
+  d.syncPosition(before);
+  await drive(r, d.playMove({ move, before, after, mover: 1, moverIsHuman: true, names: NAMES, stats: { hype: { 1: 0, '-1': 0 } } }));
+  assert.equal(d._rageShown[1], false);
+});
+
+test('the AI keeps its combos and ULTIMATE short when a human waits (MUX-19)', async () => {
+  const times = {};
+  for (const [label, human, hype] of [
+    ['human', true, 0],
+    ['ai', false, 0],
+    ['aiUlt', false, 1],
+  ]) {
+    const { r, d } = setup('russian', 'epic');
+    const { before, move, after } = tripleMove();
+    r.setPosition(before);
+    d.syncPosition(before);
+    const names = { 1: { name: 'A', isHuman: human }, '-1': { name: 'B', isHuman: !human } };
+    const res = await drive(r, d.playMove({ move, before, after, mover: 1, moverIsHuman: human, names, stats: { hype: { 1: hype, '-1': 0 } } }));
+    assert.ok(res.finished);
+    assert.deepEqual(boardDiff(r, after), []);
+    times[label] = res.t;
+  }
+  assert.ok(times.ai < times.human * 0.85, JSON.stringify(times));
+  assert.ok(times.aiUlt <= 3500, JSON.stringify(times));
+});

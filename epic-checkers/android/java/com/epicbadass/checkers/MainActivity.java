@@ -317,6 +317,11 @@ public final class MainActivity extends Activity implements AssetWebViewClient.H
 
     // ------------------------------------------------------------------ window
 
+    /**
+     * Hides the status and navigation bars (swipe shows them transiently). The display-cutout mode
+     * stays at its default, which keeps the page below a notch / punch hole: see the note in
+     * res/values/styles.xml (decision F9).
+     */
     @SuppressWarnings("deprecation")
     private void applyImmersive() {
         Window w = getWindow();

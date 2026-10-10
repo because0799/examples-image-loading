@@ -192,3 +192,105 @@ test('Ease set: endpoints and characteristic shapes', () => {
   assert.equal(resolveEase('nope'), Ease.outCubic);
   assert.equal(lerpColor(0x000000, 0xffffff, 0.5), 0x808080);
 });
+
+// ---------------------------------------------------------------- slowMo + hitStop composition (F4)
+function stepRun(c, ms) {
+  for (let t = 0; t < ms; t += 10) c.update(10);
+}
+
+test('hitStop inside a slowMo returns to the slow-mo, which still eases back to 1', async () => {
+  const c = new Clock();
+  c.slowMo(0.3, 600, { inMs: 120, outMs: 260 });
+  stepRun(c, 200);
+  assert.equal(c.scale, 0.3);
+  c.hitStop(100);
+  assert.ok(c.scale <= 0.02, 'frozen at once');
+  stepRun(c, 50);
+  assert.ok(c.scale <= 0.02, 'still frozen');
+  stepRun(c, 70);
+  assert.equal(c.scale, 0.3, 'back in the slow-mo');
+  stepRun(c, 3000);
+  assert.equal(c.scale, 1);
+  assert.equal(c.managed, false);
+  assert.equal(c.targetScale, 1);
+});
+
+test('hitStop during the slow-mo ease-in, hitStop outliving the slow-mo, hitStop then slowMo: all end at 1', () => {
+  const a = new Clock();
+  a.slowMo(0.3, 600, { inMs: 200, outMs: 260 });
+  stepRun(a, 50);
+  a.hitStop(60);
+  stepRun(a, 70);
+  assert.ok(a.scale > 0.3 && a.scale < 1, `ease-in continues (${a.scale})`);
+  stepRun(a, 3000);
+  assert.equal(a.scale, 1);
+
+  const b = new Clock();
+  b.slowMo(0.3, 100, { inMs: 0, outMs: 0 });
+  stepRun(b, 50);
+  b.hitStop(200);
+  stepRun(b, 100);
+  assert.ok(b.scale <= 0.02);
+  stepRun(b, 3000);
+  assert.equal(b.scale, 1);
+
+  const d = new Clock();
+  d.hitStop(100);
+  stepRun(d, 20);
+  d.slowMo(0.3, 600);
+  stepRun(d, 3000);
+  assert.equal(d.scale, 1);
+});
+
+test('setScale overrides a running slowMo / hitStop; slowMo returns to the base scale', () => {
+  const c = new Clock();
+  c.slowMo(0.3, 1000);
+  stepRun(c, 200);
+  c.setScale(2);
+  assert.equal(c.managed, false);
+  stepRun(c, 2000);
+  assert.equal(c.scale, 2);
+  c.setScale(0.5);
+  c.hitStop(50);
+  stepRun(c, 100);
+  assert.equal(c.scale, 0.5, 'hit-stop restores the base');
+  c.slowMo(0.2, 100, { inMs: 0, outMs: 0 });
+  stepRun(c, 300);
+  assert.equal(c.scale, 0.5, 'slow-mo returns to the base');
+});
+
+// ---------------------------------------------------------------- exception safety (F2)
+test('a throwing task / listener is dropped and the clock keeps running', async () => {
+  const c = new Clock();
+  const orig = console.error;
+  const logged = [];
+  console.error = (...a) => logged.push(a.join(' '));
+  try {
+    let n = 0;
+    const bad = tween({ x: 0 }, { x: 1 }, { duration: 100, clock: c, onUpdate: () => {
+      throw new Error('boom');
+    } });
+    const good = tween({ x: 0 }, { x: 1 }, { duration: 50, clock: c, onUpdate: () => n++ });
+    const lis = () => {
+      throw new Error('listener boom');
+    };
+    c.add(lis);
+    c.update(16);
+    assert.equal(c._iterating, false);
+    c.update(16);
+    c.update(16);
+    c.update(16);
+    assert.equal(await bad, false, 'the failing tween resolves false');
+    assert.equal(await good, true, 'other tasks keep running');
+    assert.ok(n >= 3);
+    assert.ok(c.errors >= 2);
+    assert.ok(logged.length >= 1 && logged.length <= 2, 'errors are rate-limited');
+    c.remove(lis);
+    const w = wait(32, { clock: c });
+    c.update(16);
+    c.update(16);
+    assert.equal(await w, true);
+  } finally {
+    console.error = orig;
+  }
+});

@@ -23,8 +23,11 @@
 //       speed / life / size are multipliers; count is the high-quality count (scaled by quality);
 //       angle + spread aim the burst (radians); layer 'world' | 'board' | 'screen'; energy: inward, radius
 //   shockwave(x, y, { strength, radius (squares), duration, color })
-//   flash(color, { duration, alpha, blend: 'add' | 'normal', attack })
+//   flash(color, { duration, alpha, blend: 'add' | 'normal', attack, force })
 //   impactFrame({ duration, focus: {x,y} world | screenFocus: {x,y}, lines, threshold })
+//       Screen budget (EAD-04): flash / chromatic / zoomBlur / bloomPulse requested while an impact
+//       frame runs start right after it (the manga panel stays crisp; flash { force } opts out); a
+//       third simultaneous heavy filter kind gets half strength; a flash over a bloom is softened.
 //   speedLines({ focus | screenFocus, duration, density, color, style: 'speed'|'focus'|'dash', angle })
 //   focusLines(opts)                    = speedLines({ style: 'focus' })
 //   shake(intensity, duration, opts)    → camera.shake (×0.35 in classic)
@@ -35,10 +38,14 @@
 //   lightning(x1, y1, x2, y2, { color, duration, branches, width, sky })
 //   slash(x, y, angle, { color, length (squares), duration, width, flip })
 //   kanji(text, x, y, { size (px), color, duration, screen, exit: 'shatter'|'slice'|'fade', backdrop:
-//         'rays'|'burst'|'none', rotation, delay, realtime })   (kept on screen automatically)
+//         'rays'|'burst'|'none', rotation, delay, realtime, clamp, clampRect, avoid })
+//         world kanji are kept inside fx.safeRect (else the screen) EVERY frame, even while the camera
+//         moves (clamp: false opts out); avoid() -> screen rect to keep clear of (e.g. the combo counter)
 //   banner(text, { sub, color, style: 'epic'|'gold'|'victory'|'defeat'|'classic', duration, y })
-//   cutIn({ title, subtitle, color, side: 'left'|'right', duration, pieceColor (1|-1), king, y })
-//   comboCounter(n, { color, label, hold, side })      (stays up `hold` ms after the last hit)
+//   cutIn({ title, subtitle (wraps to ≤ 2 lines, ≥ 13 px), tag (small gold plate above the band),
+//          color, side: 'left'|'right', duration, pieceColor (1|-1), king, y })
+//   comboCounter(n, { color, label, hold, side, at: {x, y} screen, fit: max height })
+//         (stays up `hold` ms after the last hit; `at`/`fit` put it in a free lane)
 //   pillar(x, y, { color, duration, width (squares), spiral, godrays })
 //   aura(pieceView, { color, intensity }) -> { stop(), setColor(c), setIntensity(v), promise }
 //   afterimages(pieceView, { duration, color, spacing, alpha })
@@ -53,6 +60,7 @@
 //   grade({ amount, dark, tint, duration, fade }) desaturate/darken the scene (defeat) (.stop())
 //   vignette(color, { alpha, duration, fade })
 //   hideCombo(), emit(kind, x, y, opts) (raw particles, no promise), sideColor(side)
+//   fx.safeRect = { x, y, width, height } | null   screen area free of the DOM HUD (set by the Director)
 //   setLang('ru'|'en') (default labels), setQuality(q) (FX only — call renderer.setQuality too),
 //   preload(texts?), destroy(), stats() (debug: live effects / particles / nodes / attached filters)
 //   new FX({ renderer, quality, mode, textures }) — `textures` lets several FX share one FxTextures.
@@ -100,6 +108,12 @@ export class FX {
     this._tmp = { x: 0, y: 0 };
     this._tmp2 = { x: 0, y: 0 };
     this.combo = null;
+    /** real-time end of the running impact frame (screen punctuation waits for it, EAD-04) */
+    this._impactUntil = 0;
+    /** live heavy full-screen filter effects per kind (rgb / zoom / bloom) */
+    this._heavy = { rgb: 0, zoom: 0, bloom: 0 };
+    /** optional screen rect (CSS px) kept free of the DOM HUD; kanji are clamped into it */
+    this.safeRect = null;
 
     // containers inside the renderer's FX layers
     const L = renderer.layers;
@@ -208,7 +222,7 @@ export class FX {
 
   _tick(gdt, rdt) {
     this.env.sq = this.sq;
-    this.particles.update(gdt, rdt);
+    this._safe('particles', () => this.particles.update(gdt, rdt));
     const list = this._effects;
     const n = list.length;
     for (let i = 0; i < n; i++) {
@@ -223,7 +237,13 @@ export class FX {
           e.delay = 0;
         }
         e.started = true;
-        if (e.start) e.start();
+        if (e.start) {
+          try {
+            e.start();
+          } catch (err) {
+            console.error('[fx] effect start failed', err);
+          }
+        }
       }
       e.t += dt;
       const k = e.duration > 0 ? Math.min(1, e.t / e.duration) : 0;
@@ -240,9 +260,22 @@ export class FX {
     let w = 0;
     for (let i = 0; i < list.length; i++) if (!list[i].done) list[w++] = list[i];
     list.length = w;
-    this._updateAuras(gdt, rdt);
-    this.filters.update();
-    this._applyTime();
+    this._safe('auras', () => this._updateAuras(gdt, rdt));
+    this._safe('filters', () => this.filters.update());
+    this._safe('time', () => this._applyTime());
+  }
+
+  /** Run one stage of the frame; a throw is logged (rate-limited) and the frame goes on (F2). */
+  _safe(where, fn) {
+    try {
+      fn();
+    } catch (err) {
+      const now = this.clock.realNow;
+      if (!(now - (this._errAt || -1e9) < 1000)) {
+        this._errAt = now;
+        console.error(`[fx] ${where} update failed`, err);
+      }
+    }
   }
 
   // ===================================================================== pools / helpers
@@ -446,16 +479,64 @@ export class FX {
     s.tint = color;
     const blend = o.blend || (this.epic ? 'add' : 'normal');
     s.blendMode = blend;
-    const peak = (o.alpha != null ? o.alpha : this.epic ? 0.85 : 0.35) * (this.epic ? 1 : 0.6);
+    let peak = (o.alpha != null ? o.alpha : this.epic ? 0.85 : 0.35) * (this.epic ? 1 : 0.6);
     const attack = o.attack != null ? o.attack : 0.12;
     s.alpha = 0;
+    // a flash never lands on an impact frame (it would white out the manga panel): it waits for it
+    const gate = o.force ? { delay: 0, k: 1 } : this._screenGate(null);
     return this._run({
       duration: o.duration || 200,
+      delay: gate.delay,
       realtime: o.realtime !== false,
+      start: () => {
+        // bloom already glowing: a full-strength additive flash on top only washes the frame out
+        if (this._heavy.bloom > 0 && blend === 'add') peak *= 0.6;
+      },
       update: (dt, t, k) => {
         s.alpha = peak * (k < attack ? k / attack : Math.pow(1 - (k - attack) / (1 - attack), 2));
       },
       end: () => this._free(s),
+    });
+  }
+
+  /**
+   * Full-screen punctuation budget (EAD-04): effects requested while an impact frame runs start
+   * right after it (the inverted panel must stay crisp), and a third simultaneous heavy filter
+   * kind (rgb / zoom / bloom) only gets half strength. Returns { delay (ms), k (strength mul) }.
+   */
+  _screenGate(kind) {
+    const now = this.clock.realNow;
+    const delay = this._impactUntil > now ? this._impactUntil - now : 0;
+    let others = 0;
+    for (const key of ['rgb', 'zoom', 'bloom']) if (key !== kind && this._heavy[key] > 0) others++;
+    return { delay, k: others >= 2 ? 0.5 : 1 };
+  }
+
+  /** Run a heavy full-screen filter effect through the gate; `make(h, k)` returns the updater. */
+  _heavyRun(kind, duration, o, make) {
+    const gate = this._screenGate(kind);
+    let h = null;
+    let counted = false;
+    let upd = null;
+    return this._run({
+      duration,
+      delay: gate.delay,
+      realtime: o.realtime !== false,
+      start: () => {
+        h = this.filters.request(kind);
+        if (!h) return;
+        this._heavy[kind]++;
+        counted = true;
+        const g2 = this._screenGate(kind);
+        upd = make(h, Math.min(gate.k, g2.k));
+      },
+      update: (dt, t, k) => {
+        if (upd) upd(dt, t, k);
+      },
+      end: () => {
+        if (counted) this._heavy[kind] = Math.max(0, this._heavy[kind] - 1);
+        if (h) h.release();
+      },
     });
   }
 
@@ -554,64 +635,48 @@ export class FX {
 
   // ===================================================================== full-screen filters
   chromatic(strength = 1, duration = 320, o = {}) {
-    if (!this.epic) return this._done();
-    const h = this.filters.request('rgb');
-    if (!h) return this._done();
+    if (!this.epic || !this.filters.can('rgb')) return this._done();
     const scr = this.renderer.screen;
-    const px = 7 * strength * Math.max(0.8, Math.min(1.8, Math.min(scr.width, scr.height) / 390));
-    let jitT = 0;
-    h.angle = Math.random() * TAU;
-    return this._run({
-      duration,
-      realtime: o.realtime !== false,
-      update: (dt, t, k) => {
+    const px0 = 7 * strength * Math.max(0.8, Math.min(1.8, Math.min(scr.width, scr.height) / 390));
+    return this._heavyRun('rgb', duration, o, (h, gk) => {
+      const px = px0 * gk;
+      let jitT = 0;
+      h.angle = Math.random() * TAU;
+      return (dt, t, k) => {
         jitT -= dt;
         if (jitT <= 0) {
           jitT = 34;
           h.angle = (Math.random() - 0.5) * 0.9 + (Math.random() < 0.5 ? 0 : Math.PI);
         }
         h.strength = px * Math.pow(1 - k, 1.6);
-      },
-      end: () => h.release(),
+      };
     });
   }
 
   zoomBlur(x, y, strength = 0.22, duration = 360, o = {}) {
     if (!this.epic) return this._done();
-    const h = this.filters.request('zoom');
-    if (!h) {
+    if (!this.filters.can('zoom')) {
       return this.speedLines({ focus: { x, y }, duration, density: 0.6, style: 'speed', realtime: o.realtime });
     }
-    return this._run({
-      duration,
-      realtime: o.realtime !== false,
-      update: (dt, t, k) => {
-        const p = this._w2s(x, y);
-        h.x = p.x;
-        h.y = p.y;
-        h.amount = this.sq * 0.7 * this.zoom;
-        const env = k < 0.12 ? k / 0.12 : Math.pow(1 - (k - 0.12) / 0.88, 1.5);
-        h.strength = strength * env;
-      },
-      end: () => h.release(),
+    return this._heavyRun('zoom', duration, o, (h, gk) => (dt, t, k) => {
+      const p = this._w2s(x, y);
+      h.x = p.x;
+      h.y = p.y;
+      h.amount = this.sq * 0.7 * this.zoom;
+      const env = k < 0.12 ? k / 0.12 : Math.pow(1 - (k - 0.12) / 0.88, 1.5);
+      h.strength = strength * gk * env;
     });
   }
 
   bloomPulse(strength = 1, duration = 520, o = {}) {
     const s = this.epic ? strength : strength * 0.35;
-    const h = this.filters.request('bloom');
-    if (!h) {
+    if (!this.filters.can('bloom')) {
       if (!this.epic) return this._done();
       return this.flash(0xffffff, { alpha: 0.12 * strength, duration, blend: 'add', attack: 0.25 });
     }
-    return this._run({
-      duration,
-      realtime: o.realtime !== false,
-      update: (dt, t, k) => {
-        const env = k < 0.2 ? Ease.outCubic(k / 0.2) : Math.pow(1 - (k - 0.2) / 0.8, 2);
-        h.strength = 1.6 * s * env;
-      },
-      end: () => h.release(),
+    return this._heavyRun('bloom', duration, o, (h, gk) => (dt, t, k) => {
+      const env = k < 0.2 ? Ease.outCubic(k / 0.2) : Math.pow(1 - (k - 0.2) / 0.8, 2);
+      h.strength = 1.6 * s * gk * env;
     });
   }
 
@@ -1114,7 +1179,8 @@ export class FX {
     this.emit('spark', x, y, { count: 34, color: mixHex(color, 0xffd23f, 0.5), speed: 1.2 * size });
     this.emit('debris', x, y, { count: 10, size });
     this.emit('smoke', x, y, { count: 8, size: size * 1.2, life: 1.1 });
-    const box = this._box(this.c.worldOver, 'explosion');
+    // under the lettering layer: an onomatopoeia popping over a blast must stay readable
+    const box = this._box(this.c.worldUnder, 'explosion');
     const flash = this._sprite(this.textures.frame('dot'), box);
     flash.blendMode = 'add';
     flash.position.set(x, y);
@@ -1175,8 +1241,9 @@ export class FX {
         }
       },
       end: () => {
-        rec.refs--;
+        rec.refs = Math.max(0, rec.refs - 1);
         this._dispose(box);
+        if (typeof this.textures._trimCracks === 'function') this.textures._trimCracks();
       },
     });
   }
@@ -1452,6 +1519,7 @@ export class FX {
 
   // ===================================================================== anime (anime.js)
   impactFrame(o = {}) {
+    if (this.epic) this._impactUntil = Math.max(this._impactUntil, this.clock.realNow + (o.duration || 120));
     return Anime.impactFrame(this, o);
   }
 
@@ -1506,6 +1574,8 @@ export class FX {
     this.particles.clear();
     this.filters.clear();
     this._resetTime();
+    this._impactUntil = 0;
+    this._heavy = { rgb: 0, zoom: 0, bloom: 0 };
     for (const c of Object.values(this.c)) {
       for (const k of c.children.slice()) this._dispose(k);
     }

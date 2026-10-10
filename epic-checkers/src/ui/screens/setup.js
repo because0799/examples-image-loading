@@ -1,4 +1,5 @@
 // Game setup: variant carousel (mini board previews), colour, AI level, EPIC toggle, giveaway, START.
+// AI-vs-AI demo: one level picker per fighter (GameConfig.levelWhite / levelBlack; `level` = white's).
 
 import { h, tap } from '../dom.js';
 import { t, loc, locList } from '../i18n.js';
@@ -17,6 +18,8 @@ export function createSetup(ui, params = {}) {
     mode,
     humanColor: last.humanColor,
     level: last.level,
+    levelWhite: last.levelWhite || last.level,
+    levelBlack: last.levelBlack || last.level,
     epic: ui.isEpic,
     giveaway: last.giveaway,
   };
@@ -100,13 +103,12 @@ export function createSetup(ui, params = {}) {
   }
 
   // ------------------------------------------------------------ level
-  let levelSec = null;
-  let paintLevel = () => {};
-  if (mode !== 'pvp') {
+  // One picker per AI: `key` is the cfg field it edits ('level' | 'levelWhite' | 'levelBlack').
+  function levelPicker(key, { label, side = 0, compact = false } = {}) {
     const levelName = h('div.lvl__name');
-    const levelDesc = h('div.lvl__desc');
+    const levelDesc = compact ? null : h('div.lvl__desc');
     const lvlBtns = [];
-    const lvl = h('div.lvl', { role: 'radiogroup', 'aria-label': t('setup.level') });
+    const lvl = h('div.lvl', { role: 'radiogroup', 'aria-label': label || t('setup.level') });
     for (let n = 1; n <= 5; n++) {
       const b = h(
         'button.lvl__opt',
@@ -116,8 +118,8 @@ export function createSetup(ui, params = {}) {
           dataset: { n },
           on: {
             click: tap(() => {
-              cfg.level = n;
-              paintLevel();
+              cfg[key] = n;
+              paint();
             }),
           },
         },
@@ -128,18 +130,37 @@ export function createSetup(ui, params = {}) {
       lvlBtns.push(b);
       lvl.appendChild(b);
     }
-    paintLevel = () => {
+    const paint = () => {
+      const v = cfg[key];
       lvlBtns.forEach((b, i) => {
-        const on = i + 1 === cfg.level;
+        const on = i + 1 === v;
         b.classList.toggle('is-active', on);
         b.setAttribute('aria-checked', on ? 'true' : 'false');
       });
       const epic = cfg.epic;
-      levelName.textContent = `${cfg.level} · ${t((epic ? 'levelEpic.' : 'level.') + cfg.level)}`;
-      levelDesc.textContent = t((epic ? 'levelDescEpic.' : 'levelDesc.') + cfg.level);
-      lvl.style.setProperty('--lvl', cfg.level);
+      levelName.textContent = `${v} · ${t((epic ? 'levelEpic.' : 'level.') + v)}`;
+      if (levelDesc) levelDesc.textContent = t((epic ? 'levelDescEpic.' : 'levelDesc.') + v);
+      lvl.style.setProperty('--lvl', v);
     };
-    levelSec = section(mode === 'demo' ? t('setup.levelDemo') : t('setup.level'), lvl, h('div.lvl__info', levelName, levelDesc));
+    const head = side ? h('div.lvl__side', pieceChip(side, 'lvl__chip'), h('span', label)) : null;
+    const node = h('div.lvl-picker', { class: compact ? 'lvl-picker--compact' : '' }, head, lvl, h('div.lvl__info', levelName, levelDesc));
+    return { node, paint };
+  }
+
+  let levelSec = null;
+  let paintLevel = () => {};
+  if (mode === 'ai') {
+    const p = levelPicker('level');
+    paintLevel = p.paint;
+    levelSec = section(t('setup.level'), p.node);
+  } else if (mode === 'demo') {
+    const pw = levelPicker('levelWhite', { label: t('common.white'), side: 1, compact: true });
+    const pb = levelPicker('levelBlack', { label: t('common.black'), side: -1, compact: true });
+    paintLevel = () => {
+      pw.paint();
+      pb.paint();
+    };
+    levelSec = section(t('setup.levelDemo'), pw.node, pb.node);
   }
 
   // ------------------------------------------------------------ hints for pvp / demo
@@ -202,10 +223,14 @@ export function createSetup(ui, params = {}) {
       variantId: cfg.variantId,
       mode,
       humanColor: mode === 'ai' ? cfg.humanColor : 1,
-      level: cfg.level,
+      level: mode === 'demo' ? cfg.levelWhite : cfg.level,
       epic: cfg.epic,
       giveaway: cfg.giveaway,
     };
+    if (mode === 'demo') {
+      config.levelWhite = cfg.levelWhite;
+      config.levelBlack = cfg.levelBlack;
+    }
     ui.emit('play', config);
   }
 

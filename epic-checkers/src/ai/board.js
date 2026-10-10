@@ -49,7 +49,8 @@ const EG_RBALANCE = 3;
 const EG_F16 = 4;
 const EG_F5 = 5;
 const EG_BROAD = 6;
-const EG_IDS = { r3v1: EG_R3V1, rRoad: EG_RROAD, rBalance: EG_RBALANCE, f16: EG_F16, f5: EG_F5, bRoad: EG_BROAD };
+const EG_P3V1 = 7;
+const EG_IDS = { r3v1: EG_R3V1, p3v1: EG_P3V1, rRoad: EG_RROAD, rBalance: EG_RBALANCE, f16: EG_F16, f5: EG_F5, bRoad: EG_BROAD };
 const KEY_W = 1;
 const KEY_B = 2;
 const BALANCE_BASE = 100000;
@@ -267,6 +268,7 @@ function loneKingSquare(board, code) {
 function egKey(rule, wm, wk, bm, bk, board, mainDiag) {
   switch (rule) {
     case EG_R3V1:
+    case EG_P3V1:
       if (bm === 0 && bk === 1 && wk >= 3) return KEY_W;
       if (wm === 0 && wk === 1 && bk >= 3) return KEY_B;
       return 0;
@@ -306,6 +308,8 @@ function egDraw(rule, key, n, f) {
   switch (rule) {
     case EG_R3V1:
       return strongMoves(key, n, f) >= 15;
+    case EG_P3V1:
+      return strongMoves(key, n, f) >= 13;
     case EG_RROAD:
       return strongMoves(key, n, f) >= 5;
     case EG_RBALANCE: {
@@ -1131,7 +1135,8 @@ export class SearchBoard {
     const wk = this.wk;
     const bm = this.bm;
     const bk = this.bk;
-    if (wm + wk + bm + bk > 7) {
+    // more than 7 pieces: only the 3+ kings vs a lone king rules can apply (engine: updateEg)
+    if (wm + wk + bm + bk > 7 && !(bm === 0 && bk === 1) && !(wm === 0 && wk === 1)) {
       for (let j = 0; j < R3; j++) eg[j] = 0;
       return;
     }

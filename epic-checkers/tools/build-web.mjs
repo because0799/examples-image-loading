@@ -7,7 +7,10 @@
 //                                               (uses src/dev/NAME.html if present, else a default page)
 //
 // Output layout (dist/www):
-//   index.html  app.js  app.css  fonts.css  fonts/*.woff2  ai-worker.js (debug copy)
+//   index.html  app.js  app.css  fonts.css  fonts/*.woff2   (+ ai-worker.js debug copy with --dev)
+// Everything in dist/www ships inside the APK (tools/build-apk.sh), so nothing unused goes there:
+// the worker is embedded in app.js, and web/static/icon-512.png (the 400 KB source of the launcher
+// icon, which a WebView never shows as a favicon) stays in the repo only.
 //
 // The AI worker is bundled first and injected into app.js as the string constant
 // __AI_WORKER_SRC__, so the app can start it from a Blob URL (works under any origin,
@@ -98,9 +101,13 @@ async function buildApp({ entry, outDir, html, workerSrc }) {
     logLevel: 'warning',
   });
   buildFonts(outDir);
-  if (workerSrc) fs.writeFileSync(path.join(outDir, 'ai-worker.js'), workerSrc);
+  // readable copy of the embedded worker, for debugging only (never shipped)
+  if (workerSrc && (dev || demo)) fs.writeFileSync(path.join(outDir, 'ai-worker.js'), workerSrc);
   fs.writeFileSync(path.join(outDir, 'index.html'), html);
 }
+
+/** web/static files that are NOT copied into dist/www (kept in the repo for other tools). */
+const STATIC_SKIP = new Set(['icon-512.png']);
 
 const DEFAULT_DEMO_HTML = (name) => `<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
@@ -129,6 +136,8 @@ if (demo) {
   if (!fs.existsSync(path.join(outDir, 'app.css'))) fs.writeFileSync(path.join(outDir, 'app.css'), '');
   // static extras (icons etc.)
   const extra = path.join(ROOT, 'web/static');
-  if (fs.existsSync(extra)) fs.cpSync(extra, outDir, { recursive: true });
+  if (fs.existsSync(extra)) {
+    fs.cpSync(extra, outDir, { recursive: true, filter: (src) => !STATIC_SKIP.has(path.relative(extra, src)) });
+  }
   console.log(`app -> ${path.relative(ROOT, outDir)} (${Date.now() - t0} ms)`);
 }

@@ -40,7 +40,8 @@ export const EPIC = {
   slate: 0x1d1733,
   moveDot: 0x3ddc97,
   capture: 0xff3b5c,
-  lastMove: 0xffb547,
+  /** fallback only: the epic last move is drawn in the mover's neon (highlights.lastMoveColor) */
+  lastMove: 0xb9a6ff,
   lastMoveAlpha: 0.32,
   hint: 0x29e6ff,
   path: 0xffd23f,

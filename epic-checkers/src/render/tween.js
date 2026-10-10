@@ -2,10 +2,18 @@
 //
 //   const clock = new Clock();             // the Renderer drives it from the Pixi ticker
 //   clock.setScale(0.25, 200);             // smooth slow-mo (transition runs in REAL time)
+//   clock.slowMo(0.3, 600);                // ease in, hold, ease back (composes with hitStop)
 //   clock.hitStop(90);                     // freeze game time for 90 real ms, then restore
 //   await tween(sprite, { x: 100, 'scale.x': 2, tint: 0xff0000 }, { duration: 300, ease: 'outBack' });
 //   await wait(500);                       // game time (slow-mo aware)
 //   await wait(500, { realtime: true });   // real time (ignores slow-mo / hit-stop)
+//
+// Time scale model: setScale() sets the BASE scale (an explicit override: it also cancels a running
+// slowMo / hitStop). slowMo() and hitStop() are layered on top of the base and compose: a hit-stop
+// inside a slow-mo freezes, then returns to the slow-mo, which still eases back to the base; a
+// hit-stop during the slow-mo's ease-in does not cut the transition short; a hit-stop that outlives
+// the slow-mo restores the base. Clock.update() is exception-safe: a throwing task or listener is
+// logged and dropped, the clock keeps running (one bad effect never freezes the game).
 //
 // Every tween()/wait() promise has .cancel(finish = false): cancelling resolves the promise with
 // `false` (never rejects, so fire-and-forget code is safe); cancel(true) jumps to the end values
@@ -132,6 +140,15 @@ export class Clock {
     this._scaleDuration = 0;
     this._scaleEase = Ease.inOutQuad;
     this._scaleToken = 0;
+    /** base scale (set by setScale); slowMo / hitStop compose on top of it */
+    this._base = 1;
+    /** active slow-mo: { from, scale, t0, inMs, holdEnd, outMs } (real-time ms) or null */
+    this._slow = null;
+    /** active hit-stop: { until, scale } (real-time ms) or null */
+    this._hit = null;
+    /** errors swallowed by update() (debug) */
+    this.errors = 0;
+    this._lastErrorLog = -1e9;
 
     this._tasks = [];
     this._incoming = [];
@@ -149,6 +166,10 @@ export class Clock {
   setScale(v, transitionMs = 0, ease = Ease.inOutQuad) {
     v = Math.max(0, +v || 0);
     this._scaleToken++;
+    // an explicit scale is an override: it ends a running slow-mo / hit-stop
+    this._slow = null;
+    this._hit = null;
+    this._base = v;
     if (!transitionMs || transitionMs <= 0) {
       this.scale = v;
       this._scaleFrom = this._scaleTo = v;
@@ -164,34 +185,86 @@ export class Clock {
 
   /** Target time scale (the value scale is transitioning to). */
   get targetScale() {
+    if (this._hit) return this._hit.scale;
+    if (this._slow) return this._slow.scale;
     return this._scaleTo;
   }
 
-  /**
-   * Hit-stop: freeze game time for `ms` real milliseconds, then restore the previous scale.
-   * If something else changes the scale meanwhile, that change wins (no restore).
-   */
-  hitStop(ms = 80, freezeScale = 0.02) {
-    const restore = this._scaleTo;
-    this.setScale(freezeScale, 0);
-    const token = this._scaleToken;
-    return wait(ms, { clock: this, realtime: true }).then(() => {
-      if (this._scaleToken === token) this.setScale(restore, 0);
-    });
+  /** True while a slowMo / hitStop owns the time scale. */
+  get managed() {
+    return !!(this._slow || this._hit);
   }
 
   /**
-   * Slow motion: ease into `scale`, hold for `ms` (real time), ease back to 1.
-   * Resolves when back to normal (or when overridden by another setScale call).
+   * Hit-stop: freeze game time for `ms` real milliseconds, then return to whatever the scale would
+   * be without it (the running slow-mo, else the base scale). Overlapping hit-stops extend the
+   * freeze. An explicit setScale() meanwhile wins (the hit-stop is dropped).
+   * Resolves (true) when the freeze is over.
+   */
+  hitStop(ms = 80, freezeScale = 0.02) {
+    ms = Math.max(0, +ms || 0);
+    const until = this.realNow + ms;
+    const scale = Math.max(0, +freezeScale || 0);
+    if (this._hit) {
+      this._hit.until = Math.max(this._hit.until, until);
+      this._hit.scale = Math.min(this._hit.scale, scale);
+    } else {
+      this._enterManaged();
+      this._hit = { until, scale };
+    }
+    this._applyManaged(this.realNow);
+    return wait(ms, { clock: this, realtime: true });
+  }
+
+  /**
+   * Slow motion: ease into `scale` (inMs), hold `ms`, ease back to the base scale (outMs) — all in
+   * real time. Starts from the current slow-mo value (a new slowMo replaces the previous one).
+   * Composes with hitStop (see the header). Resolves when the slow-mo is over.
    */
   slowMo(scale = 0.3, ms = 600, { inMs = 120, outMs = 260 } = {}) {
-    this.setScale(scale, inMs);
-    const token = this._scaleToken;
-    return wait(inMs + ms, { clock: this, realtime: true }).then(() => {
-      if (this._scaleToken !== token) return;
-      this.setScale(1, outMs);
-      return wait(outMs, { clock: this, realtime: true });
-    });
+    const now = this.realNow;
+    this._enterManaged();
+    const from = this._slow ? this._slowValue(now) : this._base;
+    inMs = Math.max(0, +inMs || 0);
+    outMs = Math.max(0, +outMs || 0);
+    ms = Math.max(0, +ms || 0);
+    this._slow = { from, scale: Math.max(0, +scale || 0), t0: now, inMs, holdEnd: now + inMs + ms, outMs };
+    this._applyManaged(now);
+    return wait(inMs + ms + outMs, { clock: this, realtime: true });
+  }
+
+  /** Leave plain setScale mode: finish a running transition (its target becomes the base). */
+  _enterManaged() {
+    if (this._slow || this._hit) return;
+    if (this._scaleDuration > 0) {
+      this._scaleDuration = 0;
+      this._base = this._scaleTo;
+    } else this._base = this.scale;
+  }
+
+  /** Slow-mo value at real time t (base scale when no slow-mo runs). */
+  _slowValue(t) {
+    const S = this._slow;
+    if (!S) return this._base;
+    if (t < S.t0 + S.inMs) return S.from + (S.scale - S.from) * Ease.inOutQuad((t - S.t0) / S.inMs);
+    if (t < S.holdEnd) return S.scale;
+    if (t < S.holdEnd + S.outMs) return S.scale + (this._base - S.scale) * Ease.inOutQuad((t - S.holdEnd) / S.outMs);
+    return this._base;
+  }
+
+  /** Recompute the composed scale at real time t (drops expired slow-mo / hit-stop). */
+  _applyManaged(t) {
+    const S = this._slow;
+    if (S && t >= S.holdEnd + S.outMs) this._slow = null;
+    let v = this._slowValue(t);
+    const H = this._hit;
+    if (H) {
+      if (t < H.until) v = H.scale;
+      else this._hit = null;
+    }
+    this.scale = v;
+    this._scaleFrom = this._scaleTo = this._slow || this._hit ? v : this._base;
+    this._scaleDuration = 0;
   }
 
   /** Per-frame listener: fn(gameDeltaMs, realDeltaMs, clock). Returns an unsubscribe function. */
@@ -213,11 +286,15 @@ export class Clock {
   /** Advance the clock by a real delta (ms). Called once per frame by the driver. */
   update(realDeltaMs) {
     let dt = +realDeltaMs || 0;
-    if (dt < 0) dt = 0;
+    if (dt < 0 || dt !== dt) dt = 0;
     if (dt > this.maxDelta) dt = this.maxDelta;
     this.frame++;
 
-    if (this._scaleDuration > 0) {
+    if (this._slow || this._hit) {
+      // the scale of this frame is the composed value at the frame's start (a hit-stop issued
+      // just now freezes this very frame)
+      this._applyManaged(this.realNow);
+    } else if (this._scaleDuration > 0) {
       this._scaleElapsed += dt;
       const k = Math.min(1, this._scaleElapsed / this._scaleDuration);
       this.scale = this._scaleFrom + (this._scaleTo - this._scaleFrom) * this._scaleEase(k);
@@ -233,7 +310,7 @@ export class Clock {
     this.realNow += dt;
     this.now += gdt;
 
-    // tasks
+    // tasks (exception-safe: a throwing task is dropped, the others keep running)
     if (this._incoming.length) {
       for (let i = 0; i < this._incoming.length; i++) this._tasks.push(this._incoming[i]);
       this._incoming.length = 0;
@@ -242,20 +319,43 @@ export class Clock {
     if (tasks.length) {
       this._iterating = true;
       let w = 0;
-      for (let i = 0; i < tasks.length; i++) {
-        const t = tasks[i];
-        if (!t.done) t.step(t.realtime ? dt : gdt);
-        if (!t.done) tasks[w++] = t;
+      let i = 0;
+      try {
+        for (; i < tasks.length; i++) {
+          const t = tasks[i];
+          if (!t.done) {
+            try {
+              t.step(t.realtime ? dt : gdt);
+            } catch (e) {
+              this._report('task', e);
+              try {
+                if (typeof t.cancel === 'function') t.cancel(false);
+              } catch (e2) {
+                /* ignore */
+              }
+              t.done = true;
+            }
+          }
+          if (!t.done) tasks[w++] = t;
+        }
+      } finally {
+        // (defensive) keep whatever was not visited if the loop itself was interrupted
+        for (i += 1; i < tasks.length; i++) if (!tasks[i].done) tasks[w++] = tasks[i];
+        tasks.length = w;
+        this._iterating = false;
       }
-      tasks.length = w;
-      this._iterating = false;
     }
 
-    // listeners
+    // listeners (exception-safe)
     const ls = this._listeners;
     for (let i = 0; i < ls.length; i++) {
       const l = ls[i];
-      if (!l.dead) l.fn.call(l.context, gdt, dt, this);
+      if (l.dead) continue;
+      try {
+        l.fn.call(l.context, gdt, dt, this);
+      } catch (e) {
+        this._report('listener', e);
+      }
     }
     if (this._listenersDirty) {
       let w = 0;
@@ -263,6 +363,14 @@ export class Clock {
       ls.length = w;
       this._listenersDirty = false;
     }
+  }
+
+  /** Log a swallowed error (at most once per second, so a per-frame failure cannot flood). */
+  _report(where, e) {
+    this.errors++;
+    if (this.realNow - this._lastErrorLog < 1000) return;
+    this._lastErrorLog = this.realNow;
+    if (typeof console !== 'undefined') console.error(`[clock] ${where} failed`, e);
   }
 
   /** @internal */

@@ -590,6 +590,9 @@ function buildText(text, st, res, seed) {
 }
 
 // ============================================================================ FxTextures
+/** Max cached crack decal variants (each holds up to two canvas textures). */
+const CRACK_CACHE = 8;
+
 export class FxTextures {
   constructor(resolution = 2) {
     this.res = Math.max(1, Math.min(3, resolution));
@@ -790,7 +793,7 @@ export class FxTextures {
    * cracks, epic only, else null), size }. Cached per seed/mode/colour/size bucket.
    */
   crack(seed, { epic = true, color = 0xff2e63, size = 100 } = {}) {
-    const S = Math.max(32, Math.round(size / 8) * 8);
+    const S = Math.max(32, Math.round(size / 16) * 16);
     const key = `crack|${seed}|${epic ? 1 : 0}|${epic ? color : 0}|${S}`;
     let rec = this._misc.get(key);
     if (rec && !rec.base.destroyed) return rec;
@@ -894,21 +897,49 @@ export class FxTextures {
       });
       glow = textureFromCanvas(glowCanvas, res, { label: 'fx-crack-glow' });
     }
-    rec = { base, glow, size: S, destroyed: false };
+    rec = { base, glow, size: S, destroyed: false, refs: 0 };
     this._misc.set(key, rec);
-    // keep at most 8 crack variants alive
-    const keys = [...this._misc.keys()].filter((k) => k.startsWith('crack|'));
-    if (keys.length > 8) {
-      const old = this._misc.get(keys[0]);
-      if (old && old.refs === 0) {
-        old.base.destroy(true);
-        if (old.glow) old.glow.destroy(true);
-        old.destroyed = true;
-        this._misc.delete(keys[0]);
-      }
-    }
-    rec.refs = rec.refs || 0;
+    this._trimCracks(rec);
     return rec;
+  }
+
+  /**
+   * Keep at most CRACK_CACHE crack variants alive (F10): evict the oldest UNREFERENCED entries
+   * (decals still on screen keep theirs; they are trimmed on a later call once released).
+   */
+  _trimCracks(keep = null) {
+    const keys = [];
+    for (const k of this._misc.keys()) if (k.startsWith('crack|')) keys.push(k);
+    let excess = keys.length - CRACK_CACHE;
+    for (let i = 0; i < keys.length && excess > 0; i++) {
+      const r = this._misc.get(keys[i]);
+      if (!r || r === keep || r.refs > 0) continue;
+      r.base.destroy(true);
+      if (r.glow) r.glow.destroy(true);
+      r.destroyed = true;
+      this._misc.delete(keys[i]);
+      excess--;
+    }
+  }
+
+  /** Number of cached crack variants (debug / tests). */
+  get crackCount() {
+    let n = 0;
+    for (const k of this._misc.keys()) if (k.startsWith('crack|')) n++;
+    return n;
+  }
+
+  /**
+   * Ink brush ensō (white, tint it): a thick, uneven circular stroke with dry-brush streaks and
+   * splatter, used behind the fighters' kanji on the VS screen. Cached per seed / size bucket.
+   */
+  brush(seed = 1, size = 256) {
+    const S = Math.min(320, Math.max(64, Math.round(size / 32) * 32));
+    return this._cached(`brush|${seed}|${S}`, () => {
+      const res = Math.min(2, this.res);
+      const c = paint(S, S, res, (ctx) => drawBrush(ctx, S, seed));
+      return textureFromCanvas(c, res, { label: 'fx-brush' });
+    });
   }
 
   /** Big piece emblem ("portrait") for cut-ins. side: 1 white, -1 black. */
@@ -985,6 +1016,57 @@ export class FxTextures {
 }
 
 // ============================================================================ emblem painter
+function drawBrush(ctx, S, seed) {
+  const r = rng(seed * 131 + 7);
+  const c = S / 2;
+  const R = S * 0.36;
+  const a0 = r() * TAU;
+  const sweep = TAU * (0.84 + r() * 0.1);
+  const steps = 90;
+  ctx.fillStyle = '#ffffff';
+  // the stroke: overlapping dabs whose width swells then thins out (brush pressure)
+  for (let i = 0; i <= steps; i++) {
+    const u = i / steps;
+    const a = a0 + sweep * u;
+    const press = Math.sin(Math.PI * Math.min(1, u * 1.15)) * (0.75 + 0.25 * Math.sin(u * 9 + seed));
+    const w = S * (0.02 + 0.085 * Math.max(0, press));
+    const rr = R * (1 + 0.04 * Math.sin(u * 7 + seed * 1.7));
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.ellipse(c + Math.cos(a) * rr, c + Math.sin(a) * rr, w, w * 0.62, a, 0, TAU);
+    ctx.fill();
+  }
+  // dry-brush streaks along the tail
+  ctx.lineCap = 'round';
+  for (let j = 0; j < 9; j++) {
+    const off = (r() - 0.5) * S * 0.09;
+    ctx.globalAlpha = 0.35 + r() * 0.4;
+    ctx.lineWidth = S * (0.004 + r() * 0.01);
+    ctx.strokeStyle = '#ffffff';
+    ctx.beginPath();
+    const from = 0.55 + r() * 0.2;
+    for (let i = 0; i <= 30; i++) {
+      const u = from + (1 - from) * (i / 30);
+      const a = a0 + sweep * u;
+      const x = c + Math.cos(a) * (R + off);
+      const y = c + Math.sin(a) * (R + off);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  // splatter
+  for (let j = 0; j < 14; j++) {
+    const a = a0 + sweep * r();
+    const d = R * (1.08 + r() * 0.22);
+    ctx.globalAlpha = 0.5 + r() * 0.5;
+    ctx.beginPath();
+    ctx.arc(c + Math.cos(a) * d, c + Math.sin(a) * d, S * (0.004 + r() * 0.012), 0, TAU);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function drawEmblem(ctx, S, side, epic, king, col, k) {
   const c = S / 2;
   const R = S * 0.4;

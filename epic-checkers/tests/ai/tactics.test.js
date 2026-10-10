@@ -209,5 +209,6 @@ test('repetition: avoids repeating a game position when winning, seeks it when l
   const afterB = E.applyMove(sb, target);
   const r3 = search(sb, { level: 4, timeMs: 30000, maxNodes: 200000, seed: 1, newGame: true, historyHashes: [E.hashState(afterB), E.hashState(sb)] });
   assert.deepEqual(r3.path, target.path, 'the losing side goes for the repetition');
-  assert.equal(r3.score, 0);
+  // a draw score: no contempt in an ending, 2 × (own − opponent's pieces) tie-break = 2 × (1 − 4)
+  assert.equal(r3.score, -6);
 });

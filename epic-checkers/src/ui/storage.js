@@ -5,6 +5,8 @@
 //   DEFAULT_SETTINGS (deep-frozen)
 //   new StatsStore({ storage?, key? })
 //     .record(summary) -> { newRecords: [{ id, value, prev }], newTitles: [{ id, icon, tier }] }
+//                         (a record is "new" only when it beats an earlier one: the very first game
+//                         sets the baselines silently)
 //     .get() -> deep copy of the stats data
 //     .titles() -> [{ id, icon, tier, unlocked, unlockedAt, progress: [cur, goal] | null }]
 //     .currentTitle() -> title id | null (rarest unlocked title, newest first on ties)
@@ -32,6 +34,9 @@ export const DEFAULT_CONFIG = deepFreeze({
   mode: 'ai',
   humanColor: 1,
   level: 3,
+  // AI-vs-AI demo: separate levels for both fighters (GameConfig.levelWhite / levelBlack)
+  levelWhite: 3,
+  levelBlack: 3,
   epic: true,
   giveaway: false,
 });
@@ -123,6 +128,8 @@ export function sanitizeConfig(cfg, base = DEFAULT_CONFIG) {
     mode: oneOf(c.mode, ['ai', 'pvp', 'demo'], base.mode),
     humanColor: oneOf(c.humanColor, [1, -1, 0], base.humanColor),
     level: oneOf(c.level, [1, 2, 3, 4, 5], base.level),
+    levelWhite: oneOf(c.levelWhite, [1, 2, 3, 4, 5], oneOf(c.level, [1, 2, 3, 4, 5], base.levelWhite ?? base.level)),
+    levelBlack: oneOf(c.levelBlack, [1, 2, 3, 4, 5], oneOf(c.level, [1, 2, 3, 4, 5], base.levelBlack ?? base.level)),
     epic: bool(c.epic, base.epic),
     giveaway: bool(c.giveaway, base.giveaway),
   };
@@ -265,8 +272,9 @@ export class StatsStore {
     const s = sanitizeSummary(summary);
     const d = this.data;
     const newRecords = [];
+    // only a record that beats an earlier one is news (no «НОВЫЙ РЕКОРД» on the very first game)
     const bump = (id, value, prev, better) => {
-      if (better && value >= (RECORD_MIN[id] || 1)) newRecords.push({ id, value, prev });
+      if (better && prev > 0 && value >= (RECORD_MIN[id] || 1)) newRecords.push({ id, value, prev });
     };
 
     if (s.mode === 'ai') {

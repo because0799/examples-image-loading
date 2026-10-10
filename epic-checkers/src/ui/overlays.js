@@ -16,14 +16,22 @@ export function buildPause(ui, { onResume, onRules, onSettings, onDraw, onRestar
   const v = st.variant;
   const modeLabel = mode === 'pvp' ? t('pause.pvp') : mode === 'demo' ? t('pause.demo') : t('pause.vsAi');
   const info = [modeLabel];
-  if (mode !== 'pvp') info.push(t((st.epic ? 'levelEpic.' : 'level.') + st.level));
+  const lvlName = (n) => t((st.epic ? 'levelEpic.' : 'level.') + n);
+  if (mode === 'demo') {
+    const lw = (st.players[1] && st.players[1].level) || st.level;
+    const lb = (st.players[-1] && st.players[-1].level) || st.level;
+    info.push(lw === lb ? lvlName(lw) : `${lvlName(lw)} vs ${lvlName(lb)}`);
+  } else if (mode === 'ai') {
+    const ai = st.players[-st.bottomColor];
+    info.push(lvlName((ai && ai.level) || st.level));
+  }
   if (st.giveaway) info.push(t('hud.giveaway'));
 
   const small = (opts) => button({ size: 'md', kind: 'secondary', ...opts });
   const grid = [
     small({ label: t('pause.rules'), icon: 'rules', onClick: onRules, cls: 'span2' }),
     small({ label: t('pause.settings'), icon: 'settings', onClick: onSettings }),
-    mode === 'pvp' ? small({ label: t('pause.offerDraw'), icon: 'handshake', onClick: onDraw }) : null,
+    mode !== 'demo' ? small({ label: t('pause.offerDraw'), icon: 'handshake', onClick: onDraw }) : null,
     small({ label: t('pause.restart'), icon: 'restart', onClick: onRestart }),
     mode !== 'demo' ? small({ label: t('pause.resign'), icon: 'flag', kind: 'danger', onClick: onResign }) : null,
     small({ label: t('pause.toMenu'), icon: 'home', kind: 'ghost', onClick: onMenu }),
@@ -57,11 +65,56 @@ function outcomeOf(result, humanColor, mode) {
 
 const sideName = (c) => (c > 0 ? t('common.white') : t('common.black'));
 
+/**
+ * Why a game was drawn, from the engine's result.detail (+ result.limit, result.rule):
+ * 'repetition', 'agreement', 'kings-only', 'no-progress', 'endgame' (r3v1/p3v1, f16/f5, rBalance),
+ * 'main-diagonal', 'one-each', 'insufficient'. '' when the detail is missing or unknown (the
+ * caller then falls back to result.reason).
+ */
+export function drawReasonText(result) {
+  if (!result || result.winner) return '';
+  const detail = result.detail;
+  const n = Number(result.limit) > 0 ? Math.round(Number(result.limit)) : 0;
+  switch (detail) {
+    case 'repetition':
+      return t('go.r.repetition');
+    case 'agreement':
+      return t('go.r.agreement');
+    case 'one-each':
+      return t('go.r.d.one-each');
+    case 'insufficient':
+      return t('go.r.insufficient');
+    case 'kings-only':
+    case 'no-progress':
+    case 'main-diagonal':
+      return n ? t(`go.r.d.${detail}`, { n }) : t('go.r.move-limit');
+    case 'endgame': {
+      if (!n) return t('go.r.move-limit');
+      const rule = result.rule;
+      const key =
+        rule === 'r3v1' || rule === 'p3v1'
+          ? 'go.r.d.endgame.3v1'
+          : rule === 'f16' || rule === 'f5'
+            ? 'go.r.d.endgame.lone'
+            : rule === 'rBalance'
+              ? 'go.r.d.endgame.balance'
+              : 'go.r.d.endgame';
+      return t(key, { n });
+    }
+    default:
+      return '';
+  }
+}
+
 export function reasonText(result, outcome, giveaway) {
   const reason = result && result.reason;
   const winner = result && result.winner;
   const persp = outcome === 'win' ? 'win' : outcome === 'loss' ? 'loss' : 'side';
   const params = winner ? { winner: sideName(winner), loser: sideName(-winner) } : {};
+  if (!winner) {
+    const d = drawReasonText(result);
+    if (d) return d;
+  }
   if (reason === 'no-pieces' || reason === 'no-moves') {
     if (!winner) return t(`go.r.${reason}.side`, params);
     return t(`${giveaway ? 'go.r.ga.' : 'go.r.'}${reason}.${persp}`, params);
@@ -107,7 +160,9 @@ export function buildGameOver(ui, opts, choose) {
   const newRecords = (records && records.newRecords) || [];
   const newTitles = (records && records.newTitles) || [];
 
-  const recordEls = newRecords.slice(0, 3).map((r) =>
+  // personal records are bragging material — not shown on a defeat card (the store keeps them)
+  const shownRecords = outcome === 'loss' ? [] : newRecords;
+  const recordEls = shownRecords.slice(0, 3).map((r) =>
     h(
       'div.go-rec',
       h('span.go-rec__tag', t('go.newRecord')),
@@ -128,7 +183,8 @@ export function buildGameOver(ui, opts, choose) {
 
   if (!epic) {
     const cell = (k, v) => h('div.go-cell', h('span.go-cell__v', String(v)), h('span.go-cell__k', k));
-    const sub = outcome === 'side' ? '' : t(`go.classic.${outcome}`);
+    const resigned = result && (result.detail || result.reason) === 'resign';
+    const sub = outcome === 'side' ? '' : outcome === 'loss' && resigned ? t('go.classic.lossResign') : t(`go.classic.${outcome}`);
     return h(
       'div.go.go--classic',
       { class: `go--${tone}` },
@@ -146,7 +202,7 @@ export function buildGameOver(ui, opts, choose) {
             cell(t('go.label.captured'), s.captures),
             cell(t('go.label.lost'), s.lost),
             cell(t('go.label.kings'), s.kings),
-            cell(t('go.label.combo'), s.combo ? `×${s.combo}` : '—'),
+            cell(t('go.label.combo'), s.combo >= 2 ? `×${s.combo}` : '—'),
           ),
         ),
         h(
@@ -173,8 +229,8 @@ export function buildGameOver(ui, opts, choose) {
             ? pick('go.brag.flawless', seed)
             : pick('go.brag.win', seed);
 
-  const statBits = [t('go.stat.combo', { n: s.combo || 0 }), t('go.stat.lost', { n: s.lost }), t('go.stat.kings', { n: s.kings })];
-  if (s.captures) statBits.splice(1, 0, t('go.stat.captures', { n: s.captures }));
+  // only numbers worth bragging about: no «Комбо ×0/×1», no «Дамок: 0»
+  const statBits = epicStatBits(s, outcome);
 
   const particles = h('div.go__particles', { 'aria-hidden': 'true' });
   const r = rng(seed + 3);
@@ -221,7 +277,7 @@ export function buildGameOver(ui, opts, choose) {
         'div.go__col.go__col--side',
         h(
           'div.go__stats',
-          statBits.map((txt) => stagger(h('span.go-stat', txt), 0.75)),
+          statBits.map((b) => stagger(h('span.go-stat', { class: b.cls || '' }, b.text), 0.75)),
         ),
         recordEls.length ? h('div.go__records', recordEls.map((n) => stagger(n, 0.95))) : null,
         titleEls.length ? h('div.go__titles', titleEls.map((n) => stagger(n, 1.1))) : null,
@@ -229,6 +285,23 @@ export function buildGameOver(ui, opts, choose) {
       ),
     ),
   );
+}
+
+/**
+ * Stat chips of the EPIC game-over card: captures, combo (≥ 2), kings made (≥ 1), losses (> 0, or a
+ * gold «Потерь: 0» on a win with captures); when nothing is left, the number of moves.
+ * s = { combo, lost, kings, captures, moves } -> [{ text, cls }]
+ */
+export function epicStatBits(s, outcome) {
+  const bits = [];
+  if (s.captures > 0) bits.push({ text: t('go.stat.captures', { n: s.captures }) });
+  if (s.combo >= 2) bits.push({ text: t('go.stat.combo', { n: s.combo }), cls: 'is-hot' });
+  if (s.kings >= 1) bits.push({ text: t('go.stat.kings', { n: s.kings }) });
+  const won = outcome === 'win' || outcome === 'side';
+  if (s.lost > 0) bits.push({ text: t('go.stat.lost', { n: s.lost }) });
+  else if (won && s.captures > 0) bits.push({ text: t('go.stat.lost', { n: 0 }), cls: 'is-gold' });
+  if (!bits.length && s.moves > 0) bits.push({ text: t('go.stat.moves', { n: s.moves }) });
+  return bits;
 }
 
 // ------------------------------------------------------------------ confirm

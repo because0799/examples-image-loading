@@ -4,6 +4,9 @@
 //   &epic=0|1  &lang=ru|en  &result=win|loss|draw|white|black  &mode=ai|pvp|demo
 //   &variant=<id>  &bg=anim|plain  &quality=high|medium|low  &stats=empty|full
 //   &rules=<variantId>|howto|epic  &setupMode=ai|pvp|demo  &flawless=1  &records=0
+//   &detail=<result.detail>&limit=N&rule=<id>   (game over: draw reason by detail code)
+//   &levelWhite=1..5&levelBlack=1..5 (demo fighters)  &status=capture|<text>  &skip=1
+//   &cine=1 (hud.setCinematic(true))  &lanes=1 (outline hud.lanes())  &impact=1 (ui.flashImpact loop)
 // window.__ui = the UI instance, window.__demo = helpers (used by screenshot steps).
 
 import { UI } from '../ui/ui.js';
@@ -149,7 +152,7 @@ function startFakeGame(cfg) {
       ? { [humanColor]: { isHuman: true }, [-humanColor]: { isHuman: false, level: cfg.level } }
       : cfg.mode === 'pvp'
         ? { 1: { isHuman: true }, '-1': { isHuman: true } }
-        : { 1: { isHuman: false, level: cfg.level }, '-1': { isHuman: false, level: cfg.level } };
+        : { 1: { isHuman: false, level: cfg.levelWhite || cfg.level }, '-1': { isHuman: false, level: cfg.levelBlack || cfg.level } };
   ui.hud.setup({ variant, players, bottomColor: cfg.mode === 'ai' ? humanColor : 1, epic: cfg.epic, mode: cfg.mode, level: cfg.level, giveaway: cfg.giveaway });
   ui.showScreen('game');
   const n = variant.piecesPerSide;
@@ -196,8 +199,11 @@ async function showFakeGameOver(res = result, reason) {
             ],
           }
         : { newRecords: [], newTitles: res === 'loss' ? [{ id: 'unbroken', icon: '魂', tier: 1 }] : [] };
+  const detail = q.get('detail');
+  const res0 = { winner, reason: reason || (winner ? 'no-pieces' : detail === 'one-each' ? 'insufficient' : detail && detail !== 'repetition' && detail !== 'agreement' ? 'move-limit' : 'repetition') };
+  if (detail) Object.assign(res0, { detail, limit: Number(q.get('limit')) || undefined, rule: q.get('rule') || undefined });
   const choice = await ui.showGameOver({
-    result: { winner, reason: reason || (winner ? 'no-pieces' : 'repetition') },
+    result: res0,
     humanColor: m === 'ai' ? humanColor : 0,
     mode: m,
     stats: fakeStats(flawless),
@@ -212,12 +218,41 @@ async function showFakeGameOver(res = result, reason) {
 window.__demo = { startFakeGame, showFakeGameOver, log: logEl, stats };
 
 // ------------------------------------------------------------------ initial screen
-const cfg = { variantId, mode: screen === 'game' || screen === 'pause' || screen === 'gameover' ? mode : 'ai', humanColor: Number(q.get('color')) || 1, level: Number(q.get('level')) || 3, epic, giveaway: q.get('giveaway') === '1' };
+const cfg = {
+  variantId,
+  mode: screen === 'game' || screen === 'pause' || screen === 'gameover' ? mode : 'ai',
+  humanColor: Number(q.get('color')) || 1,
+  level: Number(q.get('level')) || 3,
+  levelWhite: Number(q.get('levelWhite')) || undefined,
+  levelBlack: Number(q.get('levelBlack')) || undefined,
+  epic,
+  giveaway: q.get('giveaway') === '1',
+};
+
+// outline of hud.lanes() (the free space above / below the board the Director uses)
+function drawLanes() {
+  document.querySelectorAll('.demo-lane').forEach((e) => e.remove());
+  if (q.get('lanes') !== '1' || ui.currentScreen !== 'game') return;
+  const ln = ui.hud.lanes();
+  for (const k of ['top', 'bottom']) {
+    const l = ln[k];
+    if (!l) continue;
+    const d = document.createElement('div');
+    d.className = 'demo-lane';
+    Object.assign(d.style, { position: 'fixed', left: '0', right: '0', top: l.y + 'px', height: l.h + 'px', outline: '2px dashed #ffd23f', background: 'rgba(255,210,63,.12)', zIndex: 50, pointerEvents: 'none', font: '12px monospace', color: '#ffd23f' });
+    d.textContent = `${k} lane y=${l.y} h=${l.h}`;
+    document.body.appendChild(d);
+  }
+}
+ui.on('board-rect', drawLanes);
 if (screen === 'game' || screen === 'pause' || screen === 'gameover') {
   startFakeGame(cfg);
-  if (q.get('status')) ui.hud.setStatus(q.get('status') === 'capture' ? t('hud.mustCapture') : q.get('status'));
+  if (q.get('status')) ui.hud.setStatus(q.get('status') === 'capture' ? t('status.yourTurnCapture') : q.get('status'), { tone: q.get('tone') || '' });
   if (q.get('toast')) ui.hud.toast(q.get('toast'), { epic });
   if (q.get('skip') === '1') ui.hud.setSkippable(true);
+  if (q.get('cine') === '1') ui.hud.setCinematic(true);
+  if (q.get('impact') === '1') setInterval(() => ui.flashImpact(120), 900);
+  setTimeout(drawLanes, 100);
   if (screen === 'pause') setTimeout(() => ui.openPause(), 50);
   if (screen === 'gameover') setTimeout(() => showFakeGameOver(result), 50);
 } else if (screen === 'setup') {

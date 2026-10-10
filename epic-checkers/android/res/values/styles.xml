@@ -3,6 +3,14 @@
     <!--
       Full-screen, black, no title bar. DeviceDefault (Material on API 21+) keeps WebView's
       native pop-ups (JS alert/confirm, <select>) looking modern and dark.
+
+      Display cutouts (notch / punch hole): android:windowLayoutInDisplayCutoutMode is left at its
+      default on purpose (decision F9). In this immersive portrait window the default keeps the
+      page below the cutout; the band next to it is black, which matches the #05030C game
+      background, and no HUD text can end up under the camera. "shortEdges" would extend the
+      page into the cutout band, but not every Android System WebView version reports
+      env(safe-area-inset-*) for display cutouts, so the opponent's HUD panel could be hidden
+      under the camera on some phones - a few extra pixels are not worth that risk.
     -->
     <style name="EpicTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
         <item name="android:windowBackground">@color/epic_window_bg</item>

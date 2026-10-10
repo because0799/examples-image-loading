@@ -3,6 +3,7 @@
    ========================================================================== */
 
 .game {
+  --gpad: 8px;
   position: absolute;
   inset: 0;
   display: grid;
@@ -10,7 +11,7 @@
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   grid-template-areas: 'top' 'board' 'status' 'bottom' 'actions';
   row-gap: 6px;
-  padding: calc(var(--sat) + 8px) calc(var(--sar) + 8px) calc(var(--sab) + 8px) calc(var(--sal) + 8px);
+  padding: calc(var(--sat) + var(--gpad)) calc(var(--sar) + var(--gpad)) calc(var(--sab) + var(--gpad)) calc(var(--sal) + var(--gpad));
   pointer-events: none;
 }
 .hp--top {
@@ -20,10 +21,13 @@
   grid-area: board;
   position: relative;
   min-height: 0;
+  /* full-bleed: the board may use the whole screen width (the HUD keeps its side padding) */
+  margin: 0 calc(-1 * var(--gpad));
   pointer-events: none;
 }
 .status {
   grid-area: status;
+  position: relative;
 }
 .hp--bottom {
   grid-area: bottom;
@@ -42,6 +46,31 @@
 .screen--game .actions,
 .screen--game .status {
   transition: transform 0.45s var(--ease-out), opacity 0.35s;
+}
+/* cinematic mode (hud.setCinematic): VS intro, finales, ULTIMATE — the HUD slides away so the
+   anime layer owns the screen; the «Пропустить» chip stays. Layout boxes do not move. */
+.screen--game.is-cinematic .hp--top {
+  transform: translateY(-115%);
+  opacity: 0;
+  pointer-events: none;
+}
+.screen--game.is-cinematic .hp--bottom,
+.screen--game.is-cinematic .actions {
+  transform: translateY(115%);
+  opacity: 0;
+  pointer-events: none;
+}
+.screen--game.is-cinematic .act {
+  pointer-events: none;
+}
+.screen--game.is-cinematic .status__pill,
+.screen--game.is-cinematic .status__flag,
+.screen--game.is-cinematic .status__tag {
+  opacity: 0;
+}
+.screen--game.is-cinematic .hp,
+.screen--game.is-cinematic .actions {
+  transition: transform 0.32s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.26s;
 }
 .screen--game.is-entering .hp--top {
   transform: translateY(-130%);
@@ -343,8 +372,13 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 32px;
+  height: 32px;
   pointer-events: none;
+}
+.status__flag,
+.status__pill,
+.status__tag {
+  transition: opacity 0.2s;
 }
 .status__flag {
   display: inline-flex;
@@ -374,6 +408,29 @@
 .status__text {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* explanations («Бей максимум: эта шашка берёт меньше») — compact, up to two lines, same row height */
+.status.is-long .status__pill {
+  min-height: 0;
+  height: 100%;
+  padding: 1px 14px;
+  font-size: 12.5px;
+  line-height: 1.12;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  white-space: normal;
+}
+.status.is-long .status__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-align: center;
+}
+.status.has-skip .status__flag,
+.status.has-skip .status__pill,
+.status.has-skip .status__tag {
+  opacity: 0;
 }
 .status__dot {
   flex: 0 0 auto;
@@ -510,25 +567,35 @@
   pointer-events: none;
 }
 .skip-chip {
+  /* in the status row, centred where the status pill is (the pill fades out meanwhile) */
   position: absolute;
-  right: 6px;
-  bottom: 6px;
+  left: 50%;
+  top: 50%;
   z-index: 3;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 44px;
-  padding: 0 14px;
-  border-radius: 22px;
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  min-height: 28px;
+  padding: 0 18px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.32);
   font-size: 13px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  white-space: nowrap;
   opacity: 0;
-  transform: translateY(8px);
+  transform: translate(-50%, -50%) translateY(6px);
   pointer-events: none !important;
   transition: opacity 0.25s, transform 0.25s;
+}
+/* ≥ 44 px touch target around the slim chip */
+.skip-chip::before {
+  content: '';
+  position: absolute;
+  inset: -9px -12px;
 }
 .skip-chip .ico svg {
   width: 16px;
@@ -536,7 +603,7 @@
 }
 .skip-chip.is-on {
   opacity: 1;
-  transform: none;
+  transform: translate(-50%, -50%);
   pointer-events: auto !important;
 }
 
@@ -574,17 +641,20 @@
     height: 20px;
   }
   .status {
-    min-height: 28px;
+    height: 28px;
   }
   .status__pill {
     min-height: 28px;
     font-size: 14px;
   }
+  .status.is-long .status__pill {
+    font-size: 11.5px;
+  }
 }
 @media (min-width: 600px) and (min-height: 700px) {
   .game {
+    --gpad: 14px;
     row-gap: 10px;
-    padding: calc(var(--sat) + 14px) calc(var(--sar) + 14px) calc(var(--sab) + 14px) calc(var(--sal) + 14px);
   }
   .hp {
     padding: 12px 16px;
@@ -615,9 +685,15 @@
   .act__label {
     font-size: 17px;
   }
+  .status {
+    height: 36px;
+  }
   .status__pill {
     font-size: 17px;
     min-height: 36px;
+  }
+  .status.is-long .status__pill {
+    font-size: 14px;
   }
 }
 
@@ -633,6 +709,9 @@
       'status board actions';
     column-gap: 10px;
     row-gap: 8px;
+  }
+  .board-area {
+    margin: 0;
   }
   .hp {
     align-self: start;
@@ -653,6 +732,15 @@
   .status {
     align-self: end;
     flex-wrap: wrap;
+    height: auto;
+    min-height: 32px;
+  }
+  .status.is-long .status__pill {
+    height: auto;
+    padding: 4px 12px;
+  }
+  .status.is-long .status__text {
+    -webkit-line-clamp: 4;
   }
   .status__pill {
     max-width: 100%;
@@ -677,5 +765,70 @@
   }
   .act__label {
     font-size: 14px;
+  }
+}
+
+/* landscape: the «Пропустить» chip sits at the bottom of the status cell, label kept short */
+@media (orientation: landscape) and (max-height: 600px) {
+  .skip-chip {
+    top: auto;
+    bottom: 0;
+    height: 32px;
+    max-width: 100%;
+    padding: 0 12px;
+    letter-spacing: 0.04em;
+    transform: translate(-50%, 6px);
+  }
+  .skip-chip.is-on {
+    transform: translate(-50%, 0);
+  }
+  .theme-epic .skip-chip {
+    transform: translate(-50%, 6px) skewX(-12deg);
+  }
+  .theme-epic .skip-chip.is-on {
+    transform: translate(-50%, 0) skewX(-12deg);
+  }
+}
+/* small landscape phones (side columns ~130 px): compact panels and buttons so labels fit */
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 720px) {
+  .hp {
+    padding: 7px 8px;
+  }
+  .hp__avatar {
+    flex-basis: 32px;
+    width: 32px;
+    height: 32px;
+  }
+  .hp__main {
+    gap: 7px;
+  }
+  .hp__glyph,
+  .theme-epic .hp__glyph {
+    font-size: 15px;
+  }
+  .theme-epic .hp__disc {
+    inset: 4px;
+  }
+  .hp__info {
+    flex-basis: calc(100% - 40px);
+  }
+  .hp__name,
+  .theme-epic .hp__name {
+    font-size: 15px;
+  }
+  .hp__sub {
+    font-size: 12px;
+  }
+  .act {
+    gap: 7px;
+    padding: 0 9px;
+  }
+  .act__label {
+    font-size: 12.5px;
+    letter-spacing: 0.02em;
+  }
+  .act__icon svg {
+    width: 19px;
+    height: 19px;
   }
 }

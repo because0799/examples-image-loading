@@ -9,6 +9,9 @@ import { getTables } from './board.js';
 
 const cache = new Map();
 
+// Set by evalNormal when it returned the exact score of a dead-drawn ending (no jitter then).
+let drawishExact = false;
+
 /** Per-variant evaluation tables (cached). */
 export function getEvalTables(variantId) {
   const t = getTables(variantId);
@@ -155,9 +158,10 @@ export function evaluate(b, e, jitter = 0, seed = 0) {
   const bm = b.bm;
   const bk = b.bk;
   let score;
+  drawishExact = false;
   if (b.giveaway) score = evalGiveaway(b, e);
   else score = evalNormal(b, e, t, board, wm, wk, bm, bk);
-  if (jitter > 0) {
+  if (jitter > 0 && !drawishExact) {
     const h = Math.imul(b.hashLo ^ seed, 0x9e3779b1) ^ Math.imul(b.hashHi, 0x85ebca6b);
     score += ((h >>> 0) % (2 * jitter + 1)) - jitter;
   }
@@ -213,10 +217,19 @@ function evalNormal(b, e, t, board, wm, wk, bm, bk) {
     const wkk = strongW ? bk : wk;
     let div = 1;
     if (wkk >= 1) {
+      // Two pieces (or one) against a lone king cannot win with flying kings (and they are a draw by
+      // rule soon anyway: FMJD 5 moves, Russian balance rule), nor in Turkish (one piece each is an
+      // immediate draw; 2 kings vs 1 is practically drawn). Score it as the draw it is, plus the
+      // same small material tie-break as a draw in the search, so that from 3 pieces vs 1 the AI
+      // never "cashes in" a king for an illusory plus (RTR-03).
+      if (wp === 1 && sp <= 2 && (t.flying || ortho)) {
+        const tie = 2 * (sp - wp);
+        drawishExact = true; // an exact draw score: the level's evaluation jitter must not tip it
+        return strongW ? tie : -tie;
+      }
       if (t.flying && !ortho) {
         if (wp === 1) {
-          if (sp <= 2) div = 16;
-          else if (sp === 3) {
+          if (sp === 3) {
             if (n >= 10) div = 8;
             else if (t.mainDiag[loneKing(board, strongW ? -2 : 2)]) div = 8;
           } else if (sp === 4 && n >= 10 && t.mainDiag[loneKing(board, strongW ? -2 : 2)]) div = 4;
@@ -225,8 +238,6 @@ function evalNormal(b, e, t, board, wm, wk, bm, bk) {
       } else if (!t.flying) {
         if (wp === 1 && sp === 1) div = 16;
         else if (sp - wp <= 0 && sk <= wkk) div = 2;
-      } else if (ortho) {
-        if (wp === 1 && sp <= 2 && sk === sp) div = 4;
       }
     }
     if (div > 1) score = Math.round(score / div);

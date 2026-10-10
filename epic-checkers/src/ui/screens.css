@@ -760,7 +760,15 @@
   text-shadow: 0 1px 0 #000, 0 0 10px rgba(0, 0, 0, 0.8);
 }
 .epic-toggle.is-on .et__hint {
-  color: #29e6ff;
+  /* readable over the flames: white text on a dark glass pill with a cyan edge glow */
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(5, 3, 12, 0.62);
+  box-shadow: inset 0 0 0 1px rgba(41, 230, 255, 0.55), 0 0 10px rgba(41, 230, 255, 0.25);
+  text-shadow: 0 1px 2px #000, 0 0 8px rgba(41, 230, 255, 0.7);
 }
 @keyframes etShake {
   0%,
@@ -1082,6 +1090,34 @@
   line-height: 1.3;
   color: var(--muted);
   margin-top: 2px;
+}
+/* AI-vs-AI demo: one compact picker per fighter */
+.lvl-picker + .lvl-picker {
+  margin-top: 14px;
+}
+.lvl__side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px 2px;
+  font-family: var(--font-head);
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.lvl__chip {
+  width: 16px;
+  height: 16px;
+}
+.lvl-picker--compact .lvl__opt {
+  min-height: 52px;
+}
+.lvl-picker--compact .lvl__info {
+  min-height: 0;
+  margin-top: 6px;
+}
+.lvl-picker--compact .lvl__name {
+  font-size: 16px;
 }
 .setup__epic {
   margin-top: 20px;

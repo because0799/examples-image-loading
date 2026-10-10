@@ -66,7 +66,7 @@ test('Game: threefold repetition', () => {
     if (i === 3) assert.equal(g.repetitionCount(), 2);
   }
   assert.equal(g.repetitionCount(), 3);
-  assert.deepEqual(g.result, { winner: 0, reason: 'repetition' });
+  assert.deepEqual(g.result, { winner: 0, reason: 'repetition', detail: 'repetition' });
   assert.equal(g.over, true);
   assert.deepEqual(g.moves, []);
   assert.throws(() => g.play(E.parseMove('english', 'a1-b2')), /over/);
@@ -79,30 +79,30 @@ test('Game: threefold repetition', () => {
 test('Game: results from the position (win / no-moves / draw rules)', () => {
   const g = new E.Game('russian', {}, place('russian', 1, { W: ['a1'], b: ['d4'] }));
   g.play(g.moves[0]);
-  assert.deepEqual(g.result, { winner: 1, reason: 'no-pieces' });
+  assert.deepEqual(g.result, { winner: 1, reason: 'no-pieces', detail: 'no-pieces' });
   const gw = new E.Game('russian', {}, place('russian', 1, { W: ['a1'], b: ['d4'] }, { giveaway: true }));
   assert.equal(gw.options.giveaway, true);
   gw.play(gw.moves[0]);
-  assert.deepEqual(gw.result, { winner: -1, reason: 'no-pieces' });
+  assert.deepEqual(gw.result, { winner: -1, reason: 'no-pieces', detail: 'no-pieces' });
   const tk = new E.Game('turkish', {}, place('turkish', 1, { W: ['a1'], b: ['a4', 'h7'] }));
   tk.play(tk.moves[0]);
-  assert.deepEqual(tk.result, { winner: 0, reason: 'insufficient' });
+  assert.deepEqual(tk.result, { winner: 0, reason: 'insufficient', detail: 'one-each' });
 });
 
 test('Game: resign and agreement; undo clears them', () => {
   const g = new E.Game('international');
   g.play(g.moves[0]);
-  assert.deepEqual(g.resign(-1), { winner: 1, reason: 'resign' });
-  assert.deepEqual(g.result, { winner: 1, reason: 'resign' });
+  assert.deepEqual(g.resign(-1), { winner: 1, reason: 'resign', detail: 'resign' });
+  assert.deepEqual(g.result, { winner: 1, reason: 'resign', detail: 'resign' });
   assert.deepEqual(g.moves, []);
   assert.throws(() => g.play([0, 1]), /over/);
   assert.equal(g.canUndo, true);
   g.undo(); // clears the resignation and takes back the move
   assert.equal(g.result, null);
   assert.equal(g.history.length, 0);
-  assert.deepEqual(g.agreeDraw(), { winner: 0, reason: 'agreement' });
+  assert.deepEqual(g.agreeDraw(), { winner: 0, reason: 'agreement', detail: 'agreement' });
   // resign after the game is over does not change the result
-  assert.deepEqual(g.resign(1), { winner: 0, reason: 'agreement' });
+  assert.deepEqual(g.resign(1), { winner: 0, reason: 'agreement', detail: 'agreement' });
   assert.equal(g.undo(), true); // clears the agreement even with no moves
   assert.equal(g.result, null);
   assert.throws(() => g.resign(3), /color/);
@@ -129,7 +129,7 @@ test('Game: toJSON / fromJSON round-trip', () => {
   g.agreeDraw();
   const h = E.Game.fromJSON(JSON.parse(JSON.stringify(g)));
   assert.equal(E.stateToString(h.startState), E.stateToString(start));
-  assert.deepEqual(h.result, { winner: 0, reason: 'agreement' });
+  assert.deepEqual(h.result, { winner: 0, reason: 'agreement', detail: 'agreement' });
   assert.throws(() => new E.Game('russian', {}, E.createInitialState('english')), /another variant/);
 });
 

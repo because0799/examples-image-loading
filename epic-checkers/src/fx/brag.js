@@ -6,10 +6,13 @@
 //
 // Events: 'capture', 'combo' (scaled by ctx.n), 'promote', 'ultimate', 'kingslayer', 'comeback',
 // 'win', 'flawless', 'lose', 'draw', 'taunt' (opponent → player), 'brag' (player boasts), 'start',
-// 'dead' («Ты уже мёртв.»), 'nani', 'ko'. Unknown events fall back to 'brag'.
+// 'dead' («Ты уже мёртв.»), 'nani', 'ko', 'streak' (capturing turns in a row, ctx.n), 'rage' (the
+// ЯРОСТЬ meter just filled up: the next capture is the УЛЬТА). Unknown events fall back to 'brag'.
 // ctx (all optional): { n: hits in the combo, name: speaker, opp: opponent name, side: 1 | -1,
 // king: boolean, ultimate: boolean, random: () => [0, 1) for deterministic tests }.
-// Placeholders in lines: {n} {name} {opp} and {pieces} (correctly declined «шашка/шашки/шашек»).
+// Placeholders in lines: {n} {name} {opp}, and the Russian words that agree with {n}: {pieces}
+// («шашка/шашки/шашек»), {persons} («персону/персоны/персон»), {turns} («ход/хода/ходов»). Every
+// line is checked for n = 1..12 by tests/fx/brag.test.js (no «за один прыжок» for multi-jump moves).
 
 const R = Math.random;
 
@@ -47,12 +50,12 @@ const LINES = {
       'Слабое звено — устранено.',
     ],
     combo: [
-      '{n} {pieces} за один прыжок!',
+      'Одним ходом — минус {n} {pieces}!',
       'Комбо ×{n}! Кто-нибудь, остановите меня!',
       'Это называется — искусство!',
       'Цепная реакция!',
       'Они даже не поняли, что случилось.',
-      'Один прыжок — {n} павших.',
+      'Один ход — и {n} {pieces} в пыль!',
       'Выстроились в очередь? Как мило!',
       'Танец продолжается!',
       'Моя серия только началась.',
@@ -66,7 +69,7 @@ const LINES = {
     ],
     comboBig: [
       'Это уже не игра. Это зачистка.',
-      'Резня на {n} персон!',
+      'Резня на {n} {persons}!',
       'Остановите это избиение!',
       'КОМБО ×{n}! Абсолютное превосходство!',
       'Летописи запомнят этот ход.',
@@ -179,7 +182,7 @@ const LINES = {
     ],
     draw: [
       'Равные силы…',
-      'Ничья. Достойный соперник.',
+      'Достойный соперник. Уважаю.',
       'Мы ещё встретимся.',
       'Ни один не уступил.',
       'Этот бой войдёт в легенды.',
@@ -236,6 +239,22 @@ const LINES = {
       'Время легенд!',
       'В бой!',
     ],
+    streak: [
+      'Серия ×{n}! Кто следующий?',
+      '{n} {turns} подряд со взятием!',
+      'Серия ×{n}. Остановить меня некому.',
+      'Я только разогреваюсь. Серия ×{n}!',
+      'Удар за ударом — серия ×{n}!',
+      'Серия ×{n}! Твои шашки тают.',
+    ],
+    rage: [
+      'Ярость на пределе. Следующий удар — УЛЬТА!',
+      'ЯРОСТЬ 100%! Сейчас начнётся…',
+      'Чувствуешь? Это моя ярость.',
+      'Сила переполняет меня!',
+      'Предел достигнут. Готовься.',
+      'Ярость кипит. Кто первый под удар?',
+    ],
     dead: ['Ты уже мёртв.', 'Ты уже мёртв. Просто ещё не знаешь.', 'Всё уже кончено.', 'Ты проиграл ещё до удара.'],
     nani: ['НАНИ?!', 'ЧТО?!', 'КАК?!'],
     ko: ['НОКАУТ!', 'К.О.!', 'ЗАНАВЕС!'],
@@ -262,12 +281,12 @@ const LINES = {
       'Weak link — eliminated.',
     ],
     combo: [
-      '{n} {pieces} in one leap!',
+      '{n} {pieces} in a single move!',
       'Combo ×{n}! Somebody stop me!',
       "That's what I call art!",
       'Chain reaction!',
       "They didn't even know what hit them.",
-      'One leap — {n} down.',
+      'One move — {n} down.',
       'Did they line up for me? How kind!',
       'The dance goes on!',
       'My streak has only just begun.',
@@ -308,7 +327,7 @@ const LINES = {
       'Tremble!',
     ],
     ultimate: [
-      'Fury at its peak!',
+      'Rage at its peak!',
       'Feel my true power!',
       'This is the end!',
       'Final strike!',
@@ -318,7 +337,7 @@ const LINES = {
       'Prepare for oblivion!',
       'Secret technique — unlocked!',
       "Don't blink!",
-      'One hundred percent fury!',
+      'One hundred percent rage!',
       'This is going to hurt.',
     ],
     kingslayer: [
@@ -419,7 +438,7 @@ const LINES = {
       'Even my apprentice would play better.',
       "You're too predictable.",
       'Run while you still have pieces!',
-      'Your fury is empty.',
+      'Your rage is empty.',
       'I can see your fear.',
     ],
     brag: [
@@ -433,7 +452,7 @@ const LINES = {
       "I'm on fire!",
       "Who's the boss here?",
       'All according to plan.',
-      'Fury is boiling!',
+      'Rage is boiling!',
       'Power rising!',
       'This is my ninja way!',
       'Unstoppable!',
@@ -450,6 +469,22 @@ const LINES = {
       'Only one walks away a winner.',
       'The time of legends!',
       'To battle!',
+    ],
+    streak: [
+      'Streak ×{n}! Who is next?',
+      '{n} capturing moves in a row!',
+      'Streak ×{n}. Nobody can stop me.',
+      "I'm just warming up. Streak ×{n}!",
+      'Strike after strike — streak ×{n}!',
+      'Streak ×{n}! Your pieces are melting.',
+    ],
+    rage: [
+      'Rage at its peak. My next strike is the ULTIMATE!',
+      'RAGE 100%! Here it comes…',
+      'Do you feel it? That is my rage.',
+      'Power overflows me!',
+      'Limit reached. Brace yourself.',
+      "Rage is boiling. Who's first?",
     ],
     dead: ['You are already dead.', "You're already dead. You just don't know it.", "It's already over.", 'You lost before the strike.'],
     nani: ['NANI?!', 'WHAT?!', 'HOW?!'],
@@ -475,12 +510,27 @@ function pick(list, key, rnd = R) {
 
 function fill(line, ctx, lang) {
   const n = ctx.n != null ? ctx.n : 2;
-  const pieces = lang === 'en' ? (n === 1 ? 'piece' : 'pieces') : pluralRu(n, ['шашка', 'шашки', 'шашек']);
+  const en = lang === 'en';
+  const pieces = en ? (n === 1 ? 'piece' : 'pieces') : pluralRu(n, ['шашка', 'шашки', 'шашек']);
+  const persons = en ? (n === 1 ? 'guest' : 'guests') : pluralRu(n, ['персону', 'персоны', 'персон']);
+  const turns = en ? (n === 1 ? 'move' : 'moves') : pluralRu(n, ['ход', 'хода', 'ходов']);
   return line
     .replace(/\{n\}/g, String(n))
     .replace(/\{pieces\}/g, pieces)
+    .replace(/\{persons\}/g, persons)
+    .replace(/\{turns\}/g, turns)
     .replace(/\{name\}/g, ctx.name || (lang === 'en' ? 'Hero' : 'Герой'))
     .replace(/\{opp\}/g, ctx.opp || (lang === 'en' ? 'rival' : 'соперник'));
+}
+
+/** Fill the placeholders of a raw line (exported for the grammar audit in the tests). */
+export function fillLine(line, ctx = {}, lang = 'ru') {
+  return fill(line, ctx, lang === 'en' ? 'en' : 'ru');
+}
+
+/** Every bank name (for tests / tooling). */
+export function bragEvents(lang = 'ru') {
+  return Object.keys(LINES[lang === 'en' ? 'en' : 'ru']);
 }
 
 /** A bragging / taunt line for `event` (see the header). Never returns an empty string. */
@@ -601,20 +651,26 @@ export function attackName(ctx = {}, lang = 'ru') {
   const n = Math.max(1, ctx.n | 0 || 1);
   const { side, royal } = adjPool(ctx);
   const useRoyal = royal && rnd() < 0.5;
+  const ult = !!ctx.ultimate;
+  // a big plain combo (×5+) echoes its count («Казнь Пяти Драконов»); the «Тайная техника:» prefix
+  // stays exclusive to the ULTIMATE, whose name drops the adjective so it fits in ≤ 2 lines
+  const big = !ult && n >= 5 && n <= 10;
   let name;
   let pattern = Math.floor(rnd() * 3);
   if (n >= 2 && rnd() < 0.45) pattern = 1; // numbers that match the combo read great
+  if (big) pattern = 1;
   if (lang === 'en') {
     const adj = oneOf(useRoyal ? EN_ADJ.royal : EN_ADJ[side], rnd);
     if (pattern === 0) {
-      name = `${adj} ${oneOf(EN_BEAST, rnd)} ${oneOf(EN_NOUN, rnd)}`;
+      name = ult ? `${oneOf(EN_BEAST, rnd)} ${oneOf(EN_NOUN, rnd)}` : `${adj} ${oneOf(EN_BEAST, rnd)} ${oneOf(EN_NOUN, rnd)}`;
     } else if (pattern === 1) {
-      const num = n >= 2 && n <= 10 && rnd() < 0.75 ? EN_NUM[n] : rnd() < 0.5 ? 'a Thousand' : 'a Hundred';
+      const num = n >= 2 && n <= 10 && (big || rnd() < 0.75) ? EN_NUM[n] : rnd() < 0.5 ? 'a Thousand' : 'a Hundred';
       name = `${oneOf(EN_MANY_HEAD, rnd)} of ${num} ${oneOf(EN_MANY_TAIL, rnd)}`;
     } else {
-      name = `${adj} ${oneOf(EN_NOUN, rnd)} of ${oneOf(EN_GEN, rnd)}`;
+      name = ult ? `${oneOf(EN_NOUN, rnd)} of ${oneOf(EN_GEN, rnd)}` : `${adj} ${oneOf(EN_NOUN, rnd)} of ${oneOf(EN_GEN, rnd)}`;
     }
-    if (ctx.ultimate || (n >= 5 && rnd() < 0.5)) name = `${oneOf(EN_PREFIX, rnd)}: ${name}`;
+    // the prefix belongs to the ULTIMATE alone (EAD-14)
+    if (ult) name = `${oneOf(EN_PREFIX, rnd)}: ${name}`;
     return name;
   }
   const adjForms = oneOf(useRoyal ? RU_ADJ.royal : RU_ADJ[side], rnd);
@@ -622,15 +678,15 @@ export function attackName(ctx = {}, lang = 'ru') {
     const [noun, g] = oneOf(RU_NOUN, rnd);
     let beast = oneOf(RU_BEAST, rnd);
     if (beast[0] === adjForms[0]) beast = RU_BEAST[0];
-    name = `${adjForms[g]} ${beast[g]} ${noun}`;
+    name = ult ? `${beast[g]} ${noun}` : `${adjForms[g]} ${beast[g]} ${noun}`;
   } else if (pattern === 1) {
-    const num = n >= 2 && n <= 10 && rnd() < 0.75 ? RU_NUM_GEN[n] : rnd() < 0.5 ? 'Тысячи' : 'Сотни';
+    const num = n >= 2 && n <= 10 && (big || rnd() < 0.75) ? RU_NUM_GEN[n] : rnd() < 0.5 ? 'Тысячи' : 'Сотни';
     name = `${oneOf(RU_MANY_HEAD, rnd)} ${num} ${oneOf(RU_MANY_TAIL, rnd)}`;
   } else {
     const [noun, g] = oneOf(RU_NOUN, rnd);
-    name = `${adjForms[g]} ${noun} ${oneOf(RU_GEN, rnd)}`;
+    name = ult ? `${noun} ${oneOf(RU_GEN, rnd)}` : `${adjForms[g]} ${noun} ${oneOf(RU_GEN, rnd)}`;
   }
-  if (ctx.ultimate || (n >= 5 && rnd() < 0.5)) name = `${oneOf(RU_PREFIX, rnd)}: ${name}`;
+  if (ult) name = `${oneOf(RU_PREFIX, rnd)}: ${name}`;
   return name;
 }
 

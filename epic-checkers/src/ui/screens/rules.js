@@ -1,5 +1,6 @@
 // Rules: «Как играть», «Что такое EPIC режим», list of variants -> rules page per variant.
 
+import * as Engine from '../../engine/index.js';
 import { h, tap, clear } from '../dom.js';
 import { t, tl, loc, locList } from '../i18n.js';
 import { icon } from '../icons.js';
@@ -87,16 +88,30 @@ export function createRules(ui, params = {}) {
     ];
   }
 
+  /**
+   * Giveaway paragraphs for a variant: the engine's per-variant text (it says which draw rules
+   * still apply), else the engine's generic GIVEAWAY_RULES, else the UI's short note.
+   */
+  function giveawayParagraphs(v) {
+    const own = locList(v.giveawayRules);
+    if (own.length) return own;
+    const generic = locList(Engine.GIVEAWAY_RULES);
+    if (generic.length) return generic;
+    return [t('rules.giveaway')];
+  }
+
   function variantPage(id) {
     const v = ui.variant(id);
     if (!v) return [h('p.prose', '—')];
     const rules = locList(v.rules);
+    const squares = v.playable === 'all' ? t('rules.squaresAll') : v.squareTone === 'light' ? t('rules.squaresLight') : t('rules.squaresDark');
     const facts = [
       [t('rules.board'), `${v.size}×${v.size}`],
       [t('rules.pieces'), String(v.piecesPerSide)],
-      [t('rules.squares'), v.playable === 'all' ? t('rules.squaresAll') : t('rules.squaresDark')],
+      [t('rules.squares'), squares],
       [t('rules.first'), v.first === -1 ? t('common.black') : t('common.white')],
     ];
+    const giveaway = giveawayParagraphs(v);
     return [
       h(
         'div.vhero',
@@ -118,7 +133,13 @@ export function createRules(ui, params = {}) {
             h('div.card.prose', rules.map((p, i) => h('p', h('span.prose__num', String(i + 1).padStart(2, '0')), h('span', p)))),
           )
         : null,
-      section(t('rules.giveawayTitle'), h('div.card.prose', h('p', h('span.prose__num', '逆'), h('span', t('rules.giveaway'))))),
+      section(
+        t('rules.giveawayTitle'),
+        h(
+          'div.card.prose.prose--giveaway',
+          giveaway.map((p, i) => h('p', h('span.prose__num', i === 0 ? '逆' : String(i + 1).padStart(2, '0')), h('span', p))),
+        ),
+      ),
     ];
   }
 

@@ -2,7 +2,7 @@
 // Every change mutates the live settings object, saves it and emits 'settings'.
 
 import { h } from '../dom.js';
-import { t } from '../i18n.js';
+import { t, getLang } from '../i18n.js';
 import { header, section, row, segmented, switchControl, slider, button } from '../components.js';
 
 export function createSettings(ui, params = {}) {
@@ -63,7 +63,7 @@ export function createSettings(ui, params = {}) {
     cls: 'seg--num',
     options: [
       { value: 1, label: '1×' },
-      { value: 1.5, label: '1.5×' },
+      { value: 1.5, label: getLang() === 'ru' ? '1,5×' : '1.5×' }, // Russian decimal comma
       { value: 2, label: '2×' },
     ],
     onChange: (v) => set({ animSpeed: v }),

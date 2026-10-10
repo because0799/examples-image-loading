@@ -3,7 +3,7 @@
 //   setSelectable(sqs)              subtle pulsing ring around every movable piece
 //   setSelected(sq | -1)            selected square glow + the piece lifts with a gold glow
 //   setTargets(sqs, { capture })    quiet targets = green dots, capture landings = red rings / reticles
-//   setLastMove(path)               amber tint on the squares of the last move
+//   setLastMove(path)               last-move marker: amber tint (classic) / neon in the mover's colour (epic)
 //   setHint(path | null)            pulsing cyan path with flowing chevrons
 //   setPath(path)                   partial multi-jump trail (gold)
 //   clear()
@@ -393,26 +393,59 @@ export class Highlights {
     const path = this.state.lastMove;
     if (path) {
       const T = this.skin.tex;
-      const epic = this.theme === 'epic';
-      const seen = new Set();
-      path.forEach((sq, i) => {
-        if (seen.has(sq)) return;
-        seen.add(sq);
-        const c = this._center(sq);
-        const end = i === 0 || i === path.length - 1;
-        const s = p.next(T.square, 'normal');
-        s.position.set(c.x, c.y);
-        s.tint = this.P.lastMove;
-        s.alpha = (end ? this.P.lastMoveAlpha : this.P.lastMoveAlpha * 0.55) * (epic ? 0.7 : 1);
-        if (epic && end) {
-          const f = p.next(T.frame, 'add');
-          f.position.set(c.x, c.y);
-          f.tint = this.P.lastMove;
-          f.alpha = i === path.length - 1 ? 0.75 : 0.45;
-        }
-      });
+      if (this.theme === 'epic') this._drawLastEpic(p, T, path);
+      else {
+        const seen = new Set();
+        path.forEach((sq, i) => {
+          if (seen.has(sq)) return;
+          seen.add(sq);
+          const c = this._center(sq);
+          const end = i === 0 || i === path.length - 1;
+          const s = p.next(T.square, 'normal');
+          s.position.set(c.x, c.y);
+          s.tint = this.P.lastMove;
+          s.alpha = end ? this.P.lastMoveAlpha : this.P.lastMoveAlpha * 0.55;
+        });
+      }
     }
     p.end();
+  }
+
+  /** Neon colour of the last move in EPIC: the mover's energy colour pulled toward the grid violet. */
+  lastMoveColor(path = this.state.lastMove) {
+    if (!path || !path.length) return EPIC.lastMove;
+    const v = this.r.pieceAt(path[path.length - 1]);
+    const side = v ? v.color : 0;
+    const base = EPIC.side[side];
+    return base != null ? mixHex(base, EPIC.gridHot, 0.42) : EPIC.lastMove;
+  }
+
+  /**
+   * EPIC last move (EAD-05): additive neon instead of a normal-blend amber fill (which reads as
+   * muddy walnut-brown on obsidian): faint glow on the from-square, brighter on the landing square,
+   * neon frames, and only a whisper of a frame on intermediate landing squares.
+   */
+  _drawLastEpic(p, T, path) {
+    const col = this.lastMoveColor(path);
+    const last = path.length - 1;
+    const seen = new Set();
+    path.forEach((sq, i) => {
+      if (seen.has(sq) && i !== last) return;
+      seen.add(sq);
+      const c = this._center(sq);
+      const end = i === last;
+      const start = i === 0;
+      if (start || end) {
+        const s = p.next(T.square, 'add');
+        s.position.set(c.x, c.y);
+        s.tint = col;
+        s.alpha = end ? 0.16 : 0.1;
+      }
+      const f = p.next(T.frame, 'add');
+      f.position.set(c.x, c.y);
+      f.tint = col;
+      f.alpha = end ? 0.8 : start ? 0.35 : 0.2;
+    });
   }
 
   _drawSelected() {

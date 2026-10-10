@@ -16,6 +16,18 @@
 // path and against the game history, the variant's move-limit and endgame draw rules) and mate
 // scores by distance. Giveaway (поддавки) inverts terminal results and evaluation.
 //
+// Draw scores. A draw is not simply 0:
+//  - contempt: while plenty of material is on the board (≥ 1/3 of the start), the side that runs
+//    the search (the root side) scores a draw as slightly bad for itself (LEVEL_PARAMS.contempt,
+//    0.2 man). Two equal engines (AI-vs-AI demo) therefore avoid early threefold repetitions
+//    instead of shuffling into them (RTR-01). The contempt is off in endgames — there a draw by
+//    rule is often the honest result and must not be "avoided" by giving material away — and in
+//    giveaway. Because the contempt depends on the root side, the transposition table key is
+//    salted per contempt mode (none / white root / black root), so the two sides of a demo game,
+//    or the player's hints, never reuse each other's draw-biased scores.
+//  - material tie-break: a draw (repetition or by rule) scores 2 × (own pieces − opponent's
+//    pieces), so among draws the AI keeps its material instead of hanging a king (RTR-03).
+//
 // The root always works on the engine's legalMoves(state), so the returned path is legal by
 // construction; the internal generator (board.js) is only used below the root.
 
@@ -126,7 +138,29 @@ const S = {
   threatExt: 1,
   lmr: true,
   count: 64,
+  rootTurn: 1,
+  contempt: 0,
+  saltLo: 0,
+  saltHi: 0,
 };
+
+// Transposition-table salts per contempt mode: [no contempt, white root, black root].
+const SALT_LO = [0, 0x5bd1e995 | 0, 0x1b873593 | 0];
+const SALT_HI = [0, 0x27d4eb2f | 0, 0x165667b1 | 0];
+const DRAW_TIEBREAK = 2;
+
+/**
+ * Score of a drawn position (repetition / draw by rule) for the side to move: the root side's
+ * contempt plus a small material tie-break (none in giveaway, where material is a liability).
+ */
+function drawScore() {
+  const b = S.b;
+  if (b.giveaway) return 0;
+  const own = b.turn > 0 ? b.wm + b.wk : b.bm + b.bk;
+  const opp = b.turn > 0 ? b.bm + b.bk : b.wm + b.wk;
+  const c = b.turn === S.rootTurn ? -S.contempt : S.contempt;
+  return c + DRAW_TIEBREAK * (own - opp);
+}
 
 let ttBitsDefault = 20;
 
@@ -249,7 +283,7 @@ function negamax(depth, alpha, beta, ply, ext) {
   if (S.stop) return 0;
   if (ply > S.selDepth) S.selDepth = ply;
 
-  if (b.isRepetition()) return 0;
+  if (b.isRepetition()) return drawScore();
 
   const start = b.mTop;
   const cstart = b.cTop;
@@ -257,7 +291,7 @@ function negamax(depth, alpha, beta, ply, ext) {
     const n = b.generate();
     b.mTop = start;
     b.cTop = cstart;
-    return n === 0 ? lossScore(ply) : 0;
+    return n === 0 ? lossScore(ply) : drawScore();
   }
 
   // mate distance pruning
@@ -266,8 +300,8 @@ function negamax(depth, alpha, beta, ply, ext) {
   if (beta > mateHere - 1) beta = mateHere - 1;
   if (alpha >= beta) return alpha;
 
-  const lo = b.hashLo;
-  const hi = b.hashHi;
+  const lo = b.hashLo ^ S.saltLo;
+  const hi = b.hashHi ^ S.saltHi;
   const tt = S.tt;
   let ttIndex = -1;
   const te = tt.probe(lo, hi);
@@ -422,6 +456,17 @@ function rootOrderScore(b, r) {
   return b.mCapN[i] * 4096 + b.mKCap[i] * 1024 + b.mPromo[i] * 512;
 }
 
+/**
+ * Contempt for this search: the level's value while at least a third of the starting material is
+ * on the board, 0 in endgames and in giveaway.
+ */
+function rootContempt(b, P, giveaway) {
+  const c = Number.isFinite(P.contempt) ? P.contempt : 0;
+  if (giveaway || c === 0) return 0;
+  const total = b.wm + b.wk + b.bm + b.bk;
+  return 3 * total >= b.t.initialPieces ? c : 0;
+}
+
 /** One alpha-beta iteration at the root. Returns { completed, best, score }. */
 function rootIteration(list, depth, ext) {
   const b = S.b;
@@ -511,7 +556,7 @@ function extractPV(first, maxLen) {
     const key = `${b.hashLo},${b.hashHi}`;
     if (seen.has(key)) break;
     seen.add(key);
-    const te = S.tt.probe(b.hashLo, b.hashHi);
+    const te = S.tt.probe(b.hashLo ^ S.saltLo, b.hashHi ^ S.saltHi);
     if (te < 0) break;
     const idx = S.tt.move[te];
     const start = b.mTop;
@@ -583,6 +628,11 @@ function* searchSteps(state, opts, sliceMs) {
     S.seed = evalSeed;
     S.threatExt = P.threatExt;
     S.lmr = P.lmr;
+    S.rootTurn = S.b.turn;
+    S.contempt = rootContempt(S.b, P, giveaway);
+    const mode = S.contempt === 0 ? 0 : S.rootTurn === 1 ? 1 : 2;
+    S.saltLo = SALT_LO[mode];
+    S.saltHi = SALT_HI[mode];
   };
   attach();
   prepareTables(state.variantId, giveaway, !!opts.newGame);

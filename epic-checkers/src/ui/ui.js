@@ -7,7 +7,11 @@
 //   ui.boardSlotRect() -> DOMRect (CSS px, layout box of #board-slot)
 //   await ui.showGameOver({...}) -> 'rematch' | 'menu'   (on 'menu' the UI shows the menu itself)
 //   await ui.confirm(text, { ok?, cancel?, danger? }) -> boolean
-//   ui.handleBack() -> boolean (false on the title / menu root -> the app may exit)
+//   ui.handleBack() -> boolean (Android back). On the title / menu root the first press shows
+//                      «Нажми «Назад» ещё раз, чтобы выйти» and returns true; a second press within
+//                      2 s returns false (the app exits).
+//   ui.flashImpact(ms) -> manga impact frame on the DOM HUD (invert + contrast), skipped on 'low'
+//   ui.hud.lanes() / ui.hud.setCinematic(on) -> see hud.js
 //
 // Events (ui.on(name, fn) returns an unsubscribe function):
 //   'play'(GameConfig)        START pressed in setup (humanColor 0 = random, resolved by the controller)
@@ -15,12 +19,14 @@
 //   'pause' / 'resume'        pause overlay opened / closed (also emitted before resign/menu/rematch/offer-draw)
 //   'resign'({ color })       confirmed resignation (color = human in ai mode, side to move in pvp)
 //   'offer-draw'({ color, accepted: true })  pvp draw offer ACCEPTED by the other player (declines stay in the UI)
+//   'offer-draw'({ color, vsAI: true })      draw offered to the AI (ai mode, no dialog; the controller
+//                                            answers with a toast or ends the game)
 //   'menu'                    user left the game from the pause menu (the UI already shows the menu)
 //   'rematch'                 «Начать заново» from the pause menu (game over uses the showGameOver promise)
 //   'settings'(settings)      after every settings change (live object, already saved)
 //   'skip'                    «Пропустить» chip tapped during a cinematic (see hud.setSkippable)
 //   'theme'('epic'|'classic') theme of the UI changed (EPIC toggle or hud.setup)
-//   'board-rect'(DOMRect)     #board-slot moved/resized (orientation change, fonts loaded ...)
+//   'board-rect'(DOMRect)     #board-slot moved/resized or hud.lanes() changed (orientation change, fonts ...)
 //   'screen'(name)            a screen became current
 
 import './styles.css';
@@ -55,6 +61,8 @@ const SCREENS = {
 const DEPTH = { title: 0, menu: 1, setup: 2, settings: 2, rules: 2, stats: 2, game: 3 };
 const SCREEN_MS = 420;
 const OVERLAY_MS = 320;
+const BACK_EXIT_MS = 2000; // second Android back press within this window exits the app
+const IMPACT_MS = { min: 40, max: 400, def: 110 };
 
 const sameParams = (a = {}, b = {}) => {
   const ka = Object.keys(a);
@@ -267,7 +275,8 @@ export class UI {
     if (prev && prev.name === name && !opts.force && sameParams(params || {}, prev.params)) return;
 
     if (name !== 'game') {
-      this._closeOverlays((o) => o.kind !== 'confirm');
+      // confirms opened from the pause menu belong to the game and go away with it
+      this._closeOverlays((o) => o.kind !== 'confirm' || o.scope === 'game');
       if (this._epic !== !!this.settings.lastConfig.epic) this.setTheme(!!this.settings.lastConfig.epic);
     }
 
@@ -396,6 +405,7 @@ export class UI {
   openPause() {
     if (!this._screen || this._screen.name !== 'game') return;
     if (this._findOverlay('pause') || this._findOverlay('gameover')) return;
+    this._game.resetCinematic(); // the HUD (and the menu button) is always back after a pause
     this.emit('pause');
     const st = this.hud.state;
     const sideName = (c) => (c > 0 ? t('common.white') : t('common.black'));
@@ -413,29 +423,36 @@ export class UI {
       onRules: () => this.openSheet('rules', { variantId: st.variant ? st.variant.id : undefined }),
       onSettings: () => this.openSheet('settings'),
       onDraw: async () => {
+        if (st.mode === 'ai') {
+          // offered to the AI: no dialog, the controller answers (toast) or ends the game
+          resume();
+          this.emit('offer-draw', { color: st.bottomColor, vsAI: true });
+          return;
+        }
         const turn = st.turn || 1;
         const ok = await this.confirm(t('pause.drawOffer', { side: sideName(turn), other: sideName(-turn) }), {
           ok: t('pause.drawAccept'),
           cancel: t('pause.drawDecline'),
+          scope: 'game',
         });
         resume();
         if (ok) this.emit('offer-draw', { color: turn, accepted: true });
         else this.hud.toast(t('pause.drawDeclined'), { tone: 'info' });
       },
       onRestart: async () => {
-        if (!(await this.confirm(t('pause.confirmRestart')))) return;
+        if (!(await this.confirm(t('pause.confirmRestart'), { scope: 'game' }))) return;
         resume();
         this.emit('rematch');
       },
       onResign: async () => {
         const color = st.mode === 'ai' ? st.bottomColor : st.turn || 1;
         const text = st.mode === 'ai' ? t('pause.confirmResign') : t('pause.confirmResignSide', { side: sideName(color) });
-        if (!(await this.confirm(text, { ok: t('pause.resign'), danger: true }))) return;
+        if (!(await this.confirm(text, { ok: t('pause.resign'), danger: true, scope: 'game' }))) return;
         resume();
         this.emit('resign', { color });
       },
       onMenu: async () => {
-        if (!(await this.confirm(t('pause.confirmMenu'), { ok: t('pause.toMenu'), danger: true }))) return;
+        if (!(await this.confirm(t('pause.confirmMenu'), { ok: t('pause.toMenu'), danger: true, scope: 'game' }))) return;
         resume();
         this.showScreen('menu', {}, { dir: -1 });
         this.emit('menu');
@@ -478,7 +495,9 @@ export class UI {
    * Resolves with 'rematch' | 'menu'. On 'menu' the UI navigates to the menu screen itself.
    */
   showGameOver(opts = {}) {
-    this._closeOverlays((o) => o.kind === 'pause' || o.kind === 'sheet' || o.kind === 'gameover');
+    // everything opened during the game goes: pause menu, sheets, pending confirms (resolved false)
+    this._closeOverlays((o) => o.kind === 'pause' || o.kind === 'sheet' || o.kind === 'gameover' || o.kind === 'confirm');
+    this._game.resetCinematic();
     const epic = opts.epic != null ? !!opts.epic : this._epic;
     const o = { giveaway: this.hud.state.giveaway, mode: this.hud.state.mode, ...opts, epic };
     return new Promise((resolve) => {
@@ -515,7 +534,10 @@ export class UI {
     });
   }
 
-  /** Confirm dialog. opts: { ok, cancel, danger, title } -> Promise<boolean>. */
+  /**
+   * Confirm dialog. opts: { ok, cancel, danger, title, scope } -> Promise<boolean>.
+   * scope 'game': closed (resolved false) when the game screen is left or the game ends.
+   */
   confirm(text, opts = {}) {
     return new Promise((resolve) => {
       let entry = null;
@@ -531,6 +553,7 @@ export class UI {
         backdropClose: true,
       });
       entry.resolve = (v) => finish(v);
+      entry.scope = opts.scope || null;
       entry.rebuild = () => entry.setContent(buildConfirm(text, opts, finish));
     });
   }
@@ -560,11 +583,48 @@ export class UI {
     }
     const s = this._screen;
     if (!s) return false;
+    if (s.name === 'title' || s.name === 'menu') return this._backToExit();
+    this._backArmedAt = 0;
     if (s.api.back && s.name !== 'game') return s.api.back() !== false;
     return this.back();
   }
 
+  /** Root screens: the first back press only warns, a second one within 2 s lets the app exit. */
+  _backToExit() {
+    const now = Date.now();
+    if (this._backArmedAt && now - this._backArmedAt <= BACK_EXIT_MS) {
+      this._backArmedAt = 0;
+      return false;
+    }
+    this._backArmedAt = now;
+    this.toast(t('toast.pressBackAgain'), { duration: BACK_EXIT_MS });
+    this.haptic(12);
+    return true;
+  }
+
+  // ------------------------------------------------------------------ impact frame
+  /**
+   * Manga impact frame on the DOM HUD for `ms` (clamped 40..400): an inverted negative, then a
+   * crushed grey frame, then back to normal. Skipped on quality 'low'. Safe to call repeatedly.
+   */
+  flashImpact(ms = IMPACT_MS.def) {
+    if ((this.settings.quality || 'high') === 'low') return;
+    const d = Math.max(IMPACT_MS.min, Math.min(IMPACT_MS.max, Number(ms) || IMPACT_MS.def));
+    const cl = this.root.classList;
+    clearTimeout(this._impactT1);
+    clearTimeout(this._impactT2);
+    cl.remove('fx-impact-b');
+    cl.add('fx-impact');
+    this._impactT1 = setTimeout(() => {
+      cl.remove('fx-impact');
+      cl.add('fx-impact-b');
+    }, Math.round(d * 0.55));
+    this._impactT2 = setTimeout(() => cl.remove('fx-impact', 'fx-impact-b'), d);
+  }
+
   destroy() {
+    clearTimeout(this._impactT1);
+    clearTimeout(this._impactT2);
     window.removeEventListener('resize', this._onResize);
     window.removeEventListener('orientationchange', this._onResize);
     window.removeEventListener('pointerdown', this._unlock, { capture: true });
