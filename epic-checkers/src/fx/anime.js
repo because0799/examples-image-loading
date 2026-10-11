@@ -239,15 +239,22 @@ function menacingStyle(fx, size, color) {
   };
 }
 
-/** Pre-render a few common pieces of lettering so the first use does not hitch. */
+/**
+ * Pre-render a FEW common pieces of lettering so the first capture does not hitch (the strings
+ * passed to preload() are for font loading; only short onomatopoeia are rasterised here, ≤ 6, so
+ * the warmup itself never stalls the start of a game).
+ */
 export function warmup(fx, texts) {
   const sq = fx.sq;
   const T = fx.textures;
   const size = Math.round(sq * 1.9);
-  const list = ['斬!', 'ドン!', ...(Array.isArray(texts) ? texts : [])];
-  for (const c of [EPIC.white, EPIC.black]) {
+  const extra = (Array.isArray(texts) ? texts : []).filter((t) => typeof t === 'string' && Array.from(t).length <= 3 && !/[A-Za-zА-Яа-яЁё]/.test(t));
+  const list = Array.from(new Set(['斬!', 'ドン!', ...extra])).slice(0, 6);
+  const snapped = size > 36 ? Math.round(size / 6) * 6 : size;
+  const cols = typeof fx.sideColor === 'function' ? [fx.sideColor(1), fx.sideColor(-1)] : [EPIC.white, EPIC.black];
+  for (const c of cols) {
     for (const t of list) {
-      const tex = T.text(t, kanjiStyle(fx, size, c));
+      const tex = T.text(t, kanjiStyle(fx, snapped, c), textSeed(t));
       T.releaseText(tex);
     }
   }
@@ -524,9 +531,22 @@ export function speedLines(fx, o = {}) {
 }
 
 // ============================================================================ kanji
+/** Stable texture seed for a piece of lettering: the same text reuses its cached texture. */
+export function textSeed(text) {
+  let h = 7;
+  for (const ch of String(text)) h = (h * 31 + ch.codePointAt(0)) % 9973;
+  return h + 1;
+}
+
+/** Entrance time (ms) of a kanji before it sits still at full size. */
+export const KANJI_IN = { epic: 230, classic: 260 };
+
 /**
  * Huge onomatopoeia / kanji pop: punch-in with overshoot, tilt + skew, shake, light-ray (or manga
  * starburst) backdrop, then shatter / slice / fade. World coords unless { screen: true }.
+ * Timing: entrance (KANJI_IN) → o.hold ms at full size (default fx.readMs(text, 'kanji'), the
+ * readable time for settings.textTime) → exit; o.duration overrides the whole length.
+ * o.avoid() may return a screen rect or an array of rects the glyph keeps clear of.
  */
 export function kanji(fx, text, x, y, o = {}) {
   const epic = fx.epic;
@@ -534,7 +554,9 @@ export function kanji(fx, text, x, y, o = {}) {
   const sq = fx.sq;
   const len = Array.from(text).length;
   const auto = screen ? Math.min(fx.renderer.screen.width * 0.32, 150) : sq * (epic ? 2.1 : 1.05);
-  const size = Math.round((o.size || auto) * (len > 3 && !o.size ? 0.78 : 1));
+  // sizes snap to 6 px steps: a repeated glyph hits the texture cache instead of re-rasterising
+  const raw = (o.size || auto) * (len > 3 && !o.size ? 0.78 : 1);
+  const size = raw > 36 ? Math.round(raw / 6) * 6 : Math.round(raw);
   const color = o.color != null ? o.color : epic ? EPIC.black : CLASSIC.gold;
   const style = o.style || kanjiStyle(fx, size, color);
   return withFonts(fx, [[style, text]], () => kanjiNow(fx, text, x, y, o, style, size, color));
@@ -545,14 +567,19 @@ function kanjiNow(fx, text, x, y, o, style, size, color) {
   const screen = !!o.screen;
   const scr = fx.renderer.screen;
   const parent = screen ? fx.c.screenUI : fx.c.worldOver;
-  const dur = o.duration || (epic ? 1050 : 950);
+  const exit = o.exit || (epic ? (Array.from(text)[0] === '斬' ? 'slice' : 'shatter') : 'fade');
+  const exitDur = epic ? (exit === 'shatter' ? 180 : 260) : 300;
+  const hold = o.hold != null ? o.hold : typeof fx.readMs === 'function' ? fx.readMs(text, 'kanji') : 1100;
+  const dur = o.duration || (epic ? KANJI_IN.epic : KANJI_IN.classic) + hold + exitDur;
   const e = { cleanup: [], realtime: o.realtime != null ? !!o.realtime : false, duration: dur, delay: o.delay || 0 };
   const root = fx._box(parent, 'kanji');
+  e.root = root; // the Director keeps newer lettering clear of this one
   root.visible = !e.delay;
   e.start = () => (root.visible = true);
   const back = fx._box(root, 'kanji-back');
   const inner = fx._box(root, 'kanji-inner');
-  const main = fx._textSprite(text, style, inner, e, (Math.random() * 1000) | 0);
+  // a fixed seed per text: repeated onomatopoeia reuse one cached texture (no canvas work)
+  const main = fx._textSprite(text, style, inner, e, o.seed != null ? o.seed : textSeed(text));
   const tex = main.texture;
   const tw = tex.fx.width;
   const th = tex.fx.height;
@@ -581,6 +608,8 @@ function kanjiNow(fx, text, x, y, o, style, size, color) {
   const halfH = size * 0.62;
   const anchorX = px;
   const anchorY = py;
+  const q = { x: 0, y: 0 };
+  const w2 = { x: 0, y: 0 };
   const keepInside = (k) => {
     if (screen) {
       if (!clampRect) return;
@@ -590,33 +619,41 @@ function kanjiNow(fx, text, x, y, o, style, size, color) {
       root.y = Math.max(clampRect.y + hh + 4, Math.min(clampRect.y + clampRect.height - hh - 4, anchorY));
       return;
     }
-    const R = clampRect || { x: 0, y: 0, width: scr.width, height: scr.height };
+    const R = clampRect || scr;
+    const rx = R.x || 0;
+    const ry = R.y || 0;
     const z = fx.zoom;
-    const q = fx._w2s(anchorX, anchorY, { x: 0, y: 0 });
+    fx._w2s(anchorX, anchorY, q);
     const hw = Math.min(R.width * 0.49, halfW * k * z);
     const hh = Math.min(R.height * 0.49, halfH * k * z);
-    let cx = Math.max(R.x + hw + 4, Math.min(R.x + R.width - hw - 4, q.x));
-    let cy = Math.max(R.y + hh + 4, Math.min(R.y + R.height - hh - 4, q.y));
-    // keep clear of another piece of lettering on screen (e.g. the combo counter on the board)
+    let cx = Math.max(rx + hw + 4, Math.min(rx + R.width - hw - 4, q.x));
+    let cy = Math.max(ry + hh + 4, Math.min(ry + R.height - hh - 4, q.y));
+    // keep clear of other lettering on screen (the combo counter, an earlier kanji …): checked
+    // once per avoid rect, nudging to the nearest free side that stays inside R
     const A = typeof o.avoid === 'function' ? o.avoid() : null;
-    if (A && cx + hw > A.x && cx - hw < A.x + A.width && cy + hh > A.y && cy - hh < A.y + A.height) {
-      const right = A.x + A.width + hw + 4;
-      const left = A.x - hw - 4;
-      const below = A.y + A.height + hh + 4;
-      const opts = [
-        { x: right, y: cy, d: Math.abs(right - cx), ok: right + hw <= R.x + R.width },
-        { x: left, y: cy, d: Math.abs(left - cx), ok: left - hw >= R.x },
-        { x: cx, y: below, d: Math.abs(below - cy), ok: below + hh <= R.y + R.height },
-      ].filter((c) => c.ok);
-      if (opts.length) {
-        opts.sort((a, b) => a.d - b.d);
-        cx = opts[0].x;
-        cy = opts[0].y;
+    const list = Array.isArray(A) ? A : A ? [A] : null;
+    if (list) {
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!a || !(cx + hw > a.x && cx - hw < a.x + a.width && cy + hh > a.y && cy - hh < a.y + a.height)) continue;
+        const right = a.x + a.width + hw + 4;
+        const left = a.x - hw - 4;
+        const below = a.y + a.height + hh + 4;
+        const above = a.y - hh - 4;
+        let bx = cx;
+        let by = cy;
+        let best = Infinity;
+        if (right + hw <= rx + R.width && right - cx < best) (best = right - cx), (bx = right), (by = cy);
+        if (left - hw >= rx && cx - left < best) (best = cx - left), (bx = left), (by = cy);
+        if (below + hh <= ry + R.height && below - cy < best) (best = below - cy), (bx = cx), (by = below);
+        if (above - hh >= ry && cy - above < best) (best = cy - above), (bx = cx), (by = above);
+        cx = bx;
+        cy = by;
       }
     }
     if (cx !== q.x || cy !== q.y) {
-      const w = fx._s2w(cx, cy, { x: 0, y: 0 });
-      root.position.set(w.x, w.y);
+      fx._s2w(cx, cy, w2);
+      root.position.set(w2.x, w2.y);
     } else root.position.set(anchorX, anchorY);
   };
   keepInside(1);
@@ -649,9 +686,6 @@ function kanjiNow(fx, text, x, y, o, style, size, color) {
     back.addChild(burstG);
     burstG.alpha = 0;
   }
-  const exit = o.exit || (epic ? (Array.from(text)[0] === '斬' ? 'slice' : 'shatter') : 'fade');
-  const exitDur = epic ? (exit === 'shatter' ? 180 : 260) : 300;
-  const exitStart = dur - exitDur;
   let exited = false;
   let pieces = null;
   let halves = null;
@@ -727,6 +761,8 @@ function kanjiNow(fx, text, x, y, o, style, size, color) {
   let jy = 0;
   let shakeT = 0;
   e.update = (dt, t) => {
+    // the exit follows e.duration, so shorten() (a newer overlay needs the spot) works too
+    const exitStart = e.duration - exitDur;
     // entrance
     let s;
     if (!epic) {
@@ -878,7 +914,8 @@ function placeTitle(b, x, y, k = 1, skew = 0, alpha = 1) {
 /**
  * Big text banner: diagonal band (gradient + scrolling streaks + hot edges) slams in, title slides
  * across, subtitle follows, everything exits. style: 'epic' | 'gold' | 'victory' | 'defeat' | 'classic'.
- * Long titles wrap onto two lines.
+ * Long titles wrap onto two lines. Timing: entrance → o.hold ms readable (default
+ * fx.readMs([title, sub], o.readKind || 'title')) → exit; o.duration overrides the whole length.
  */
 export function banner(fx, text, o = {}) {
   const style = o.style || (fx.epic ? 'epic' : 'classic');
@@ -895,6 +932,7 @@ export function banner(fx, text, o = {}) {
   const ss = subStyle(fx, sSize, color, variant);
   const pairs = [[ts, text]];
   if (o.sub) pairs.push([ss, o.sub]);
+
   return withFonts(fx, pairs, () => bannerNow(fx, text, o, { style, classic, color, bh0, ts, ss }));
 }
 
@@ -904,7 +942,11 @@ function bannerNow(fx, text, o, P) {
   const W = scr.width;
   const H = scr.height;
   const T = fx.textures;
-  const dur = o.duration || (classic ? 1700 : style === 'defeat' ? 2200 : 1600);
+  const slow = style === 'defeat' ? 1.8 : 1;
+  const inMs = classic ? 600 : Math.round(460 * slow);
+  const exitDur = classic ? 320 : 280;
+  const hold = o.hold != null ? o.hold : typeof fx.readMs === 'function' ? fx.readMs(o.sub ? [text, o.sub] : text, o.readKind || 'title') : 1600;
+  const dur = o.duration || inMs + hold + exitDur;
   const e = { cleanup: [], realtime: o.realtime !== false, duration: dur };
   const root = fx._box(fx.c.screenUI, 'banner');
   root.position.set(W / 2, o.y != null ? o.y : H * 0.42);
@@ -965,7 +1007,7 @@ function bannerNow(fx, text, o, P) {
     }
   }
   let flash = null;
-  if (!classic && style !== 'defeat') {
+  if (!classic && style !== 'defeat' && fx.flashesOn !== false) {
     flash = fx._sprite(Texture.WHITE, band);
     flash.width = bw;
     flash.height = bh;
@@ -973,10 +1015,8 @@ function bannerNow(fx, text, o, P) {
   }
   const ty = sub ? -subH * 0.5 : 0;
   const sy = ty + title.height / 2 + subH * 0.5 + 2;
-  const exitDur = classic ? 320 : 280;
-  const exitStart = dur - exitDur;
-  const slow = style === 'defeat' ? 1.8 : 1;
   e.update = (dt, t) => {
+    const exitStart = e.duration - exitDur;
     const ke = t > exitStart ? clamp01((t - exitStart) / exitDur) : 0;
     if (classic) {
       const kin = clamp01(t / 300);
@@ -1019,13 +1059,15 @@ function bannerNow(fx, text, o, P) {
 /**
  * Anime cut-in: a tilted band slides in from `side` with a zoomed glowing piece "portrait"
  * (pieceColor 1 | -1, king), streaming speed lines, big title (wraps to 2 lines) + subtitle,
- * then slides out.
+ * then slides out. Timing: entrance → o.hold ms with title + subtitle at full size (default
+ * fx.readMs([title, subtitle], o.readKind || 'cutin')) → exit; o.duration overrides the length.
+ * The portrait and the band use the side's energy colour (fx.sideColor) unless o.color is given.
  */
 export function cutIn(fx, o = {}) {
   const classic = !fx.epic;
   const side = o.side === 'right' ? 'right' : 'left';
   const pc = o.pieceColor === -1 ? -1 : 1;
-  const color = o.color != null ? o.color : classic ? CLASSIC.gold : EPIC.side[pc];
+  const color = o.color != null ? o.color : classic ? CLASSIC.gold : typeof fx.sideColor === 'function' ? fx.sideColor(pc) : EPIC.side[pc];
   const scr = fx.renderer.screen;
   const W = scr.width;
   const bh = Math.max(120, Math.min(220, W * 0.4));
@@ -1066,7 +1108,13 @@ function cutInNow(fx, o, P) {
   const W = scr.width;
   const H = scr.height;
   const sgn = side === 'left' ? 1 : -1;
-  const dur = o.duration || (classic ? 1500 : 1350);
+  const inDur = classic ? 320 : 170;
+  const exitDur = classic ? 320 : 230;
+  // the title is at full size ~300 ms in, the subtitle ~480 ms in: the readable hold starts there
+  const settle = classic ? 580 : 480;
+  const texts = [o.title, o.subtitle].filter(Boolean);
+  const hold = o.hold != null ? o.hold : typeof fx.readMs === 'function' ? fx.readMs(texts, o.readKind || 'cutin') : 1800;
+  const dur = o.duration || settle + hold + exitDur;
   const e = { cleanup: [], realtime: o.realtime !== false, duration: dur };
   const root = fx._box(fx.c.screenUI, 'cutin');
   const dim = fx._sprite(Texture.WHITE, root);
@@ -1099,7 +1147,7 @@ function cutInNow(fx, o, P) {
   // portrait: zoomed piece emblem, cropped by the band
   const pSize = Math.round(bh * 1.95);
   const texSize = Math.min(320, pSize);
-  const portrait = fx._sprite(T.emblem(pc, { epic: !classic, king: !!o.king, size: texSize }), content);
+  const portrait = fx._sprite(T.emblem(pc, { epic: !classic, king: !!o.king, size: texSize, color: classic ? undefined : o.portraitColor != null ? o.portraitColor : color }), content);
   const pBase = pSize / texSize;
   const px0 = -sgn * W * 0.33;
   portrait.position.set(px0, bh * 0.2);
@@ -1181,13 +1229,12 @@ function cutInNow(fx, o, P) {
     tag.position.set(tx0 + sgn * W * 0.06, -bh / 2 - th2 * 0.15);
     tag.alpha = 0;
   }
-  const inDur = classic ? 320 : 170;
-  const exitDur = classic ? 320 : 230;
-  const exitStart = dur - exitDur;
   e.update = (dt, t) => {
+    const exitStart = e.duration - exitDur;
     const kin = clamp01(t / inDur);
     const ke = t > exitStart ? clamp01((t - exitStart) / exitDur) : 0;
-    dim.alpha = (classic ? 0.35 : 0.5) * Ease.outCubic(kin) * (1 - ke);
+    // o.dim: lighter when the action keeps playing beside the band (finale / ULTIMATE)
+    dim.alpha = (o.dim != null ? o.dim : classic ? 0.35 : 0.5) * Ease.outCubic(kin) * (1 - ke);
     if (classic) {
       band.alpha = kin * (1 - ke);
       band.x = W / 2 - sgn * (1 - Ease.outCubic(kin)) * 40 + sgn * ke * 40;
@@ -1196,7 +1243,7 @@ function cutInNow(fx, o, P) {
       band.scale.y = 1 - 0.6 * Ease.inQuad(ke);
     }
     if (streaks) streaks.tilePosition.x += dt * 1.8 * sgn;
-    const pk = clamp01(t / dur);
+    const pk = clamp01(t / e.duration);
     portrait.x = px0 + sgn * pk * W * 0.06;
     portrait.scale.set(pBase * (1.14 - 0.12 * Ease.outCubic(pk)));
     portrait.rotation = -0.05 * sgn + pk * 0.08 * sgn;
@@ -1209,7 +1256,7 @@ function cutInNow(fx, o, P) {
       pRays.rotation = t * 0.0006;
     }
     if (glint) {
-      const gk = clamp01((t - dur * 0.32) / 300);
+      const gk = clamp01((t - Math.min(900, e.duration * 0.32)) / 300);
       const ga = gk > 0 && gk < 1 ? Math.sin(Math.PI * gk) : 0;
       glint.position.set(portrait.x, portrait.y);
       glint.scale.set((bh * 1.3 * ga) / 64);
@@ -1237,11 +1284,12 @@ function cutInNow(fx, o, P) {
     }
     if (sub) {
       const sk = clamp01((t - (classic ? 320 : 220)) / 260);
-      sub.forEach((sp, i) => {
+      for (let i = 0; i < sub.length; i++) {
+        const sp = sub[i];
         sp.alpha = sk * (1 - ke);
         sp.position.set(tx0 - sgn * (1 - Ease.outCubic(sk)) * W * 0.18, sy + (i - (sub.length - 1) / 2) * subLineH);
         if (!classic) sp.skew.x = -0.12;
-      });
+      }
     }
     if (tag) {
       const gk = clamp01((t - 90) / 200);
@@ -1374,7 +1422,8 @@ function comboNow(fx, n, o, P) {
   C.n = n;
   C.since = 0;
   C.exitT = -1;
-  C.hold = o.hold != null ? o.hold : 1700;
+  // readable after the last hit (settings.textTime): «КОМБО ×3» stays up ≥ 2.2 s × textTime
+  C.hold = o.hold != null ? o.hold : typeof fx.readMs === 'function' ? fx.readMs(`${P.label} ${P.numText}`, 'combo') : 2200;
   C.base = Math.min(1.35, 1 + 0.08 * Math.max(0, n - 2));
   C.color = P.color;
   C.texW = tex.fx.textWidth;
@@ -1430,13 +1479,14 @@ function comboUpdate(fx, C, dt) {
   C.label.scale.set(Math.min(1.15, 0.9 + 0.05 * C.n));
   // burning counter at high combos
   if (epic && C.n >= 4 && C.exitT < 0) {
-    C.emitAcc += (dt / 1000) * 14 * fx.q.mul;
+    const pq = fx.pq || fx.q.mul;
+    C.emitAcc += (dt / 1000) * 14 * pq;
     while (C.emitAcc >= 1) {
       C.emitAcc -= 1;
       fx.emit('embers', C.root.x + sgn * Math.random() * w * k, C.root.y + C.numSize * 0.3 * k, {
         screen: true,
         realtime: true,
-        count: 1 / fx.q.mul,
+        count: 1 / pq,
         color: C.color,
         speed: 1.5,
         size: 1.4,

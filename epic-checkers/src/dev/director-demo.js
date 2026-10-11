@@ -162,7 +162,26 @@ const nativeStub = {
 const renderer = new Renderer(stage);
 let fx = null;
 let director = null;
-const settings = { lang: P.lang, vibration: true, announcer: P.announcer, quality: P.quality, animSpeed: P.speed };
+// personal settings from the URL: &textTime=2&opponentFx=short&haptics=light&playerName=Макс
+// &fx=shake:0,flashes:0,brags:often,particles:0.5 (SETTINGS CONTRACT, src/ui/storage.js)
+const Q = new URLSearchParams(location.search);
+const fxOverrides = {};
+for (const kv of (Q.get('fx') || '').split(',').filter(Boolean)) {
+  const [k, v] = kv.split(':');
+  fxOverrides[k] = v === '0' || v === 'false' ? false : v === '1' || v === 'true' ? true : Number.isFinite(+v) ? +v : v;
+}
+const settings = {
+  lang: P.lang,
+  haptics: Q.get('haptics') || 'strong',
+  vibration: Q.get('haptics') !== 'off',
+  announcer: P.announcer,
+  quality: P.quality,
+  animSpeed: P.speed,
+  textTime: +(Q.get('textTime') || 1.5),
+  opponentFx: Q.get('opponentFx') || 'full',
+  playerName: Q.get('playerName') || '',
+  fx: { shake: 1, flashes: true, slowmo: true, camera: true, cutins: true, kanji: true, brags: 'normal', turnBanners: true, combo: true, particles: 1, auras: true, backdrop: true, vsIntro: true, ...fxOverrides },
+};
 let current = null;
 let frozen = false;
 

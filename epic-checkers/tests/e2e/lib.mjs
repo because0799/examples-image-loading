@@ -8,7 +8,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-export const WWW = path.join(ROOT, 'dist/www');
+// E2E_WWW=<dir> serves another build (node tools/build-web.mjs --out <dir>) instead of dist/www
+export const WWW = process.env.E2E_WWW ? path.resolve(process.env.E2E_WWW) : path.join(ROOT, 'dist/www');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -71,7 +72,7 @@ export async function newPage(browser, { width = 390, height = 844, dpr = 1, ver
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function waitApp(page, timeout = 60000) {
+export async function waitApp(page, timeout = 180000) {
   await page.waitForFunction(() => !!window.__app && !document.getElementById('boot'), null, { timeout });
 }
 

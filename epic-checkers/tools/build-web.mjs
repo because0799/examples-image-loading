@@ -5,6 +5,9 @@
 //   node tools/build-web.mjs --dev           -> same, unminified + sourcemaps
 //   node tools/build-web.mjs --demo NAME     -> bundles src/dev/NAME.js into dist/dev/NAME/
 //                                               (uses src/dev/NAME.html if present, else a default page)
+//   node tools/build-web.mjs --out DIR       -> the app bundle into DIR instead of dist/www (private
+//                                               builds while others work in the same tree; serve it to
+//                                               the e2e scripts with E2E_WWW=DIR)
 //
 // Output layout (dist/www):
 //   index.html  app.js  app.css  fonts.css  fonts/*.woff2   (+ ai-worker.js debug copy with --dev)
@@ -26,6 +29,8 @@ const args = process.argv.slice(2);
 const dev = args.includes('--dev');
 const demoIdx = args.indexOf('--demo');
 const demo = demoIdx >= 0 ? args[demoIdx + 1] : null;
+const outIdx = args.indexOf('--out');
+const outArg = outIdx >= 0 ? args[outIdx + 1] : null;
 
 const TARGET = ['chrome87', 'es2020'];
 
@@ -129,7 +134,8 @@ if (demo) {
   if (!fs.existsSync(path.join(outDir, 'app.css'))) fs.writeFileSync(path.join(outDir, 'app.css'), '');
   console.log(`demo ${demo} -> ${path.relative(ROOT, outDir)} (${Date.now() - t0} ms)`);
 } else {
-  const outDir = path.join(ROOT, 'dist/www');
+  const outDir = outArg ? path.resolve(outArg) : path.join(ROOT, 'dist/www');
+  if (outArg && (outDir === ROOT || outDir === path.parse(outDir).root)) throw new Error(`refusing to build into ${outDir}`);
   fs.rmSync(outDir, { recursive: true, force: true });
   const html = fs.readFileSync(path.join(ROOT, 'web/index.html'), 'utf8');
   await buildApp({ entry: path.join(ROOT, 'src/main.js'), outDir, html, workerSrc });

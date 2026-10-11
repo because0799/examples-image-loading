@@ -24,14 +24,19 @@ import { t, getLang } from './ui/i18n.js';
 import { text, hasText } from './controller-text.js';
 import { illegalTapReason } from './controller-capture.js';
 import { writeSave, clearSave, saveableMode } from './app-save.js';
+import { sideColors } from './controller-colors.js';
 
 // Hype («ЯРОСТЬ») tuning: fills with captures (more for combos), a little when you lose pieces,
 // a bit for promotions. At ≥ 1 the next capture is the ULTIMATE and the meter resets.
 export const HYPE = Object.freeze({ perCapture: 0.22, comboBonus: 0.12, perLoss: 0.06, promotion: 0.12 });
 
-const AI_MIN_DELAY = 450; // perceived thinking time (ms)
-const DEMO_MIN_DELAY = 700;
+/** Minimum AI "thinking" pause per settings.aiPace (ms); an AI-vs-AI demo waits a bit longer. */
+export const AI_PACE_MS = Object.freeze({ fast: 300, normal: 700, slow: 1300 });
+export const DEMO_EXTRA_MS = 400;
+/** The AI does not wait longer than this (× textTime) for the opponent-turn banner. */
+const TURN_BANNER_WAIT_MS = 1500;
 const CINEMATIC_TIMEOUT = 25000; // ticker-time watchdog for a Director promise (hang protection)
+const HAPTIC_LEVELS = ['off', 'light', 'strong'];
 /** «Пропустить» chip: shown only once a cinematic has run this long (no flashing on short ones). */
 export const SKIP_CHIP_DELAY = { epic: 900, classic: 1500 };
 /** Taps within this time after the move was committed (or after a path tap) never skip it (MUX-01). */
@@ -43,13 +48,40 @@ export const IDLE_SCREEN_MS = 3 * 60 * 1000;
 /** Draw offers to the AI (RTR-02): from this move on, accepted only if the AI is not better by more than 0.3 man. */
 export const DRAW_MIN_MOVE = 20;
 export const DRAW_ACCEPT_MAX = 30;
-const STATUS_RESET_MS = 3500;
+/** An explanation in the status line stays this long × settings.textTime. */
+const STATUS_RESET_MS = 3000;
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sign = (v) => (v > 0 ? 1 : v < 0 ? -1 : 0);
 const isColor = (c) => c === WHITE || c === BLACK;
 const clampLevel = (v, def = 3) => Math.min(5, Math.max(1, Math.round(Number(v) || def)));
+
+/** settings.textTime as a number in [1, 3] (how long texts stay readable). */
+export function textTimeOf(settings) {
+  const v = Number(settings && settings.textTime);
+  return Number.isFinite(v) && v > 0 ? Math.min(3, Math.max(1, v)) : 1.5;
+}
+
+/** Minimum AI pause for the settings (aiPace) and mode (a demo is a bit slower). */
+export function aiMinDelay(settings, mode) {
+  const pace = settings && AI_PACE_MS[settings.aiPace] != null ? settings.aiPace : 'normal';
+  return AI_PACE_MS[pace] + (mode === 'demo' ? DEMO_EXTRA_MS : 0);
+}
+
+/** settings.haptics ('off' | 'light' | 'strong'), from the old boolean `vibration` if needed. */
+export function hapticsOf(settings) {
+  if (!settings) return 'strong';
+  if (HAPTIC_LEVELS.includes(settings.haptics)) return settings.haptics;
+  return settings.vibration === false ? 'off' : 'strong';
+}
+
+/** The player's display name: settings.playerName (trimmed, ≤ 16 chars) or «Ты» / "You". */
+export function playerNameOf(settings, fallback) {
+  const raw = settings && typeof settings.playerName === 'string' ? settings.playerName : '';
+  const name = Array.from(raw.replace(/\s+/g, ' ').trim()).slice(0, 16).join('').trim();
+  return name || fallback;
+}
 
 export function freshStats() {
   return {
@@ -222,12 +254,12 @@ export class Controller {
     this._undoing = false;
     this._resumeWaiters = [];
     this._intensity = 0;
-    /** Effective graphics quality (may be below settings.quality after an adaptive step down). */
-    this.quality = settings.quality || 'high';
-    this._qualitySetting = settings.quality;
-    /** Set by main.js: called with the new settings.quality when the user changes it. */
-    this.onQualitySetting = null;
+    /** Effective graphics quality ('high' | 'medium' | 'low'; settings.quality may say 'auto'). */
+    this.quality = ['high', 'medium', 'low'].includes(settings.quality) ? settings.quality : 'high';
+    /** Frame budget / quality manager (src/app-perf.js), set by main.js; applySettings forwards to it. */
+    this.perf = null;
     this._lang = settings.lang;
+    this._sideColorsKey = undefined;
     this.startedAt = 0;
     this.mismatches = 0;
     this.errors = [];
@@ -392,10 +424,13 @@ export class Controller {
     };
     poll = setInterval(tick, 120);
     const start = clock.realNow;
+    // slower animations / longer texts make legitimately longer cinematics
+    const speed = Math.min(2, Math.max(0.5, Number(this.settings.animSpeed) || 1));
+    const timeout = CINEMATIC_TIMEOUT * Math.max(1, 1 / speed) * Math.max(1, textTimeOf(this.settings) / 1.5);
     try {
       await new Promise((resolve) => {
         const wd = setInterval(() => {
-          if (clock.realNow - start > CINEMATIC_TIMEOUT) {
+          if (clock.realNow - start > timeout) {
             clearInterval(wd);
             this._logError('cinematic', new Error('director promise timed out'));
             this._fire('skip', () => d.skip());
@@ -576,9 +611,14 @@ export class Controller {
     const lang = getLang();
     const cfg = this.cfg;
     const colorName = (c) => (c > 0 ? t('common.white') : t('common.black'));
+    const custom = playerNameOf(this.settings, '');
     const mk = (color) => {
       if (this._isHuman(color)) {
-        if (this.mode === 'pvp') return { name: colorName(color), isHuman: true, title: t('hud.player'), color };
+        if (this.mode === 'pvp') {
+          // two players on one phone: the owner's name (settings.playerName) goes to WHITE
+          if (color === WHITE && custom) return { name: custom, isHuman: true, title: colorName(color), color, custom: true };
+          return { name: colorName(color), isHuman: true, title: t('hud.player'), color };
+        }
         let title = colorName(color);
         try {
           const tid = this.statsStore && this.statsStore.currentTitle();
@@ -586,7 +626,7 @@ export class Controller {
         } catch (e) {
           /* ignore */
         }
-        return { name: t('hud.you'), isHuman: true, title, color };
+        return { name: custom || text('hud.you'), isHuman: true, title, color, custom: !!custom };
       }
       const level = clampLevel(cfg.levels ? cfg.levels[color] : cfg.level);
       const L = AI_LEVELS[level - 1] || AI_LEVELS[2];
@@ -714,6 +754,7 @@ export class Controller {
     }
     this._resetHudCinematic();
     this._setTheme(theme);
+    this._applySideColors(); // the player's energy colour depends on the side they play
     const r = this.renderer;
     try {
       r.camera.snap();
@@ -898,8 +939,8 @@ export class Controller {
       r = await think();
       if (token !== this.token) return;
     }
-    await Promise.race([turnP, sleep(this.fast ? 0 : 1500)]);
-    const minDelay = this.fast ? 0 : this.mode === 'demo' ? DEMO_MIN_DELAY : AI_MIN_DELAY;
+    await Promise.race([turnP, sleep(this.fast ? 0 : TURN_BANNER_WAIT_MS * textTimeOf(this.settings))]);
+    const minDelay = this.fast ? 0 : aiMinDelay(this.settings, this.mode);
     const rest = minDelay - (now() - t0);
     if (rest > 0) await sleep(rest);
     if (token !== this.token) return;
@@ -1070,7 +1111,7 @@ export class Controller {
     const token = this.token;
     this._statusTimer = setTimeout(() => {
       if (token === this.token && this.phase === 'human' && this._statusKind === 'explain') this._setTurnStatus();
-    }, STATUS_RESET_MS);
+    }, STATUS_RESET_MS * textTimeOf(this.settings));
     if (this._statusTimer && typeof this._statusTimer.unref === 'function') this._statusTimer.unref();
   }
 
@@ -1530,42 +1571,81 @@ export class Controller {
     }
   }
 
-  /** Effective graphics quality: renderer + FX (the UI class is main.js's business). */
+  /** Effective graphics quality: renderer + FX (the UI class is app-perf's business). */
   setQuality(q) {
-    if (!q || q === this.quality) return;
+    if (!['high', 'medium', 'low'].includes(q)) return;
     this.quality = q;
-    this._fire('renderer.setQuality', () => this.renderer.setQuality(q));
-    this._fire('fx.setQuality', () => this.fx && this.fx.setQuality(q));
+    const r = this.renderer;
+    if (r && r.quality !== q) this._fire('renderer.setQuality', () => r.setQuality(q));
+    const fx = this.fx;
+    if (fx && fx.quality !== q) this._fire('fx.setQuality', () => fx.setQuality(q));
   }
 
+  /**
+   * Applies the live settings object to every module (boot and every UI 'settings' event; the
+   * settings contract). Idempotent and cheap: modules re-read what they need.
+   *  - renderer / FX / Director applySettings (when they have it),
+   *  - haptics gate for every vibrate() (native.setHaptics), legacy `vibration` kept in sync,
+   *  - audio volumes, language,
+   *  - the player's name and energy colour (HUD, VS screen, captions, pieces),
+   *  - frame budget + quality (app-perf), board hints (showMoves).
+   */
   applySettings(st) {
+    if (!st || typeof st !== 'object') st = this.settings;
     if (!st) return;
-    if (st.quality && st.quality !== this._qualitySetting) {
-      this._qualitySetting = st.quality;
-      if (typeof this.onQualitySetting === 'function') this._fire('quality', () => this.onQualitySetting(st.quality));
-      else this.setQuality(st.quality);
-    }
+    const haptics = hapticsOf(st);
+    if (st.vibration !== (haptics !== 'off')) st.vibration = haptics !== 'off';
+    const call = (label, obj, fn) => {
+      if (obj && typeof obj[fn] === 'function') this._fire(label, () => obj[fn](st));
+    };
+    call('renderer.applySettings', this.renderer, 'applySettings');
+    call('fx.applySettings', this.fx, 'applySettings');
+    call('director.applySettings', this.director, 'applySettings');
+    this._fire('native.setHaptics', () => this.native && typeof this.native.setHaptics === 'function' && this.native.setHaptics(haptics));
     this._fire('volumes', () => {
-      this.audio.setSfxVolume(st.sfxVolume);
-      this.audio.setMusicVolume(st.musicVolume);
-      if ('muted' in st) this.audio.setMuted(!!st.muted);
+      const a = this.audio;
+      if (!a) return;
+      if (Number.isFinite(st.sfxVolume)) a.setSfxVolume(st.sfxVolume);
+      if (Number.isFinite(st.musicVolume)) a.setMusicVolume(st.musicVolume);
+      if ('muted' in st) a.setMuted(!!st.muted);
     });
-    if (st.lang && st.lang !== this._lang) {
+    const langChanged = !!st.lang && st.lang !== this._lang;
+    if (langChanged) {
       this._lang = st.lang;
       this._fire('fx.setLang', () => this.fx && this.fx.setLang(st.lang));
       this._fire('director.setLang', () => typeof this.director.setLang === 'function' && this.director.setLang(st.lang));
-      if (this.active && this.players) {
-        const fresh = this._makePlayers();
+    }
+    // player names (language, settings.playerName) — the objects are shared with the HUD / Director
+    if (this.active && this.players) {
+      const fresh = this._makePlayers();
+      const changed = [1, -1].some((c) => fresh[c].name !== this.players[c].name || fresh[c].title !== this.players[c].title);
+      if (changed || langChanged) {
         Object.assign(this.players[1], fresh[1]);
         Object.assign(this.players[-1], fresh[-1]);
-        this._fire('hud.refresh', () => this.hud.refresh());
-        if (this.phase === 'human') {
-          this._statusKind = '';
-          this._setTurnStatus();
-        }
+        this._fire('hud.refresh', () => typeof this.hud.refresh === 'function' && this.hud.refresh());
+      }
+      if (langChanged && this.phase === 'human') {
+        this._statusKind = '';
+        this._setTurnStatus();
       }
     }
+    this._applySideColors();
+    // frame budget + quality last: other modules' applySettings may have touched the renderer
+    if (this.perf && typeof this.perf.applySettings === 'function') this._fire('perf.applySettings', () => this.perf.applySettings(st));
     if (this.active && this.phase === 'human') this._paintSelection();
+  }
+
+  /** settings.playerColor → the two sides' energy colours (renderer is the single source). */
+  _applySideColors() {
+    const r = this.renderer;
+    if (!r || typeof r.setSideColors !== 'function') return;
+    const st = this.settings || {};
+    const mode = this.active ? this.mode : 'pvp'; // menus: the player's colour on WHITE
+    const colors = sideColors({ playerColor: st.playerColor, mode, humanColor: this.humanColor });
+    const key = colors ? `${colors[1]}|${colors[-1]}` : 'default';
+    if (key === this._sideColorsKey) return;
+    this._sideColorsKey = key;
+    this._fire('renderer.setSideColors', () => r.setSideColors(colors));
   }
 
   // =================================================================== game over

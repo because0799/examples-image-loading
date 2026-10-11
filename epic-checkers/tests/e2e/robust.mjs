@@ -25,11 +25,11 @@ try {
   await R.step('undo while the AI is thinking; its late answer is ignored', async () => {
     await page.goto(srv.url('?debug=1&screen=game&mode=ai&variant=russian&epic=1&level=5&intro=0&color=1'));
     await waitApp(page);
-    let st = await waitState(page, "s.phase === 'human'", 60000);
+    let st = await waitState(page, "s.phase === 'human'", 180000);
     await tapMove(st.legal[0]);
-    await waitState(page, "s.phase === 'ai' && s.thinking", 30000, 50);
+    await waitState(page, "s.phase === 'ai' && s.thinking", 90000, 50);
     await page.click('[data-act="hud.undo"]');
-    st = await waitState(page, "s.phase === 'human' && s.ply === 0", 10000);
+    st = await waitState(page, "s.phase === 'human' && s.ply === 0", 30000);
     assert(!st.thinking, 'AI cancelled');
     await sleep(3500); // level 5 thinks ~2.5 s: a stale answer would have arrived by now
     st = await appState(page);
@@ -39,7 +39,7 @@ try {
   await R.step('menu while the AI is thinking', async () => {
     let st = await appState(page);
     await tapMove(st.legal[0]);
-    await waitState(page, "s.phase === 'ai'", 30000, 50);
+    await waitState(page, "s.phase === 'ai'", 90000, 50);
     await page.click('[data-act="hud.menu"]');
     await page.waitForSelector('.ov--pause');
     await sleep(300);
@@ -60,7 +60,7 @@ try {
       window.__app.startGame({ variantId: 'turkish', mode: 'demo', level: 1, epic: true });
       window.__app.startGame({ variantId: 'international', mode: 'demo', level: 1, epic: false });
     });
-    const st = await waitState(page, 's.ply >= 6', 120000);
+    const st = await waitState(page, 's.ply >= 6', 240000);
     assert(st.variantId === 'international' && !st.epic, 'second config wins');
     const size = await page.evaluate(() => window.__app.renderer.variant.size);
     assert(size === 10, 'renderer shows the 10x10 board');
@@ -68,7 +68,7 @@ try {
   });
 
   await R.step('Android back mid-cinematic → pause, resume continues', async () => {
-    await waitState(page, 's.busy', 60000, 30);
+    await waitState(page, 's.busy', 180000, 30);
     const handled = await page.evaluate(() => window.__androidBack());
     assert(handled, 'handled');
     await page.waitForSelector('.ov--pause');
@@ -79,7 +79,7 @@ try {
     st = await appState(page);
     assert(st.ply <= ply + 1, `no moves while paused (${ply} → ${st.ply})`);
     await page.evaluate(() => window.__androidBack()); // closes the pause menu (resume)
-    await waitState(page, `s.ply >= ${st.ply + 2}`, 60000);
+    await waitState(page, `s.ply >= ${st.ply + 2}`, 180000);
   });
 
   await R.step('rotation / resize mid-game keeps the board in its slot', async () => {
@@ -101,7 +101,7 @@ try {
 
   await R.step('rapid random taps during a human turn', async () => {
     await page.evaluate(() => window.__app.startGame({ variantId: 'russian', mode: 'pvp', epic: true }));
-    await waitState(page, "s.phase === 'human'", 60000);
+    await waitState(page, "s.phase === 'human'", 180000);
     const taps = [];
     for (let i = 0; i < 40; i++) {
       const sq = Math.floor(Math.random() * 64);
@@ -112,10 +112,10 @@ try {
     await sleep(1500);
     // play on normally afterwards
     for (let i = 0; i < 4; i++) {
-      const st = await waitState(page, "s.phase === 'human' || !!s.result", 30000);
+      const st = await waitState(page, "s.phase === 'human' || !!s.result", 90000);
       if (st.result) break;
       await tapMove(st.legal[0]);
-      await waitState(page, `s.ply > ${st.ply}`, 30000);
+      await waitState(page, `s.ply > ${st.ply}`, 90000);
     }
     const st = await appState(page);
     assert(st.mismatches === 0 && st.errors.length === 0, 'clean');
@@ -124,16 +124,16 @@ try {
   await R.step('human plays black: flipped board, AI opens, tapped answer', async () => {
     await page.evaluate(() => window.__app.startGame({ variantId: 'english', mode: 'ai', humanColor: -1, level: 1, epic: false }));
     // English: black moves first → the human (black) starts
-    let st = await waitState(page, "s.phase === 'human' && s.variantId === 'english'", 60000);
+    let st = await waitState(page, "s.phase === 'human' && s.variantId === 'english'", 180000);
     assert(st.humanColor === -1 && st.bottomColor === -1, 'black at the bottom');
     assert(await page.evaluate(() => window.__app.renderer.flipped), 'renderer flipped');
     await tapMove(st.legal[0]);
-    st = await waitState(page, "s.ply >= 2 && s.phase === 'human'", 60000);
+    st = await waitState(page, "s.ply >= 2 && s.phase === 'human'", 180000);
     await page.evaluate(() => window.__app.startGame({ variantId: 'russian', mode: 'ai', humanColor: -1, level: 1, epic: true }));
     // Russian: white (AI) opens, then the human answers
-    st = await waitState(page, "s.variantId === 'russian' && s.ply === 1 && s.phase === 'human'", 60000);
+    st = await waitState(page, "s.variantId === 'russian' && s.ply === 1 && s.phase === 'human'", 180000);
     await tapMove(st.legal[st.legal.length - 1]);
-    st = await waitState(page, "s.ply >= 3 && s.phase === 'human'", 60000);
+    st = await waitState(page, "s.ply >= 3 && s.phase === 'human'", 180000);
     assert(st.mismatches === 0, 'in sync');
   });
 

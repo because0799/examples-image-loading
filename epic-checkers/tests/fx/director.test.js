@@ -372,7 +372,8 @@ test('game start / game over / turn resolve and leave the board intact', async (
     for (const [winner, human] of [[1, 1], [-1, 1], [0, 1], [1, 0]]) {
       res = await drive(r, d.playGameOver({ result: { winner, reason: 'no-pieces' }, humanColor: human, stats: { captures: { 1: 3, '-1': 0 }, piecesLost: { 1: 0, '-1': 3 } }, players: NAMES }));
       assert.ok(res.finished);
-      assert.ok(res.t <= 4100, `game over took ${res.t}`);
+      // the result stays up for its READABLE time (≥ 3 s × textTime 1.5), but not much longer
+      assert.ok(res.t >= 3000 * 1.5 && res.t <= 9500, `game over took ${res.t}`);
       assert.equal(r.clock.scale, 1);
     }
     res = await drive(r, d.playTurn({ color: 1, isHuman: true, players: NAMES }));
@@ -497,6 +498,7 @@ test('ЯРОСТЬ 100%: playMove fires playHypeReady when the meter crosses 1; 
 
 test('the AI keeps its combos and ULTIMATE short when a human waits (MUX-19)', async () => {
   const times = {};
+  const holds = {};
   for (const [label, human, hype] of [
     ['human', true, 0],
     ['ai', false, 0],
@@ -506,12 +508,20 @@ test('the AI keeps its combos and ULTIMATE short when a human waits (MUX-19)', a
     const { before, move, after } = tripleMove();
     r.setPosition(before);
     d.syncPosition(before);
+    // the attack-name band holds for the name's readable time (random name → random length)
+    holds[label] = 0;
+    const claim = d._claimCenter.bind(d);
+    d._claimCenter = (p, read, dur) => {
+      holds[label] += dur || read;
+      return claim(p, read, dur);
+    };
     const names = { 1: { name: 'A', isHuman: human }, '-1': { name: 'B', isHuman: !human } };
     const res = await drive(r, d.playMove({ move, before, after, mover: 1, moverIsHuman: human, names, stats: { hype: { 1: hype, '-1': 0 } } }));
     assert.ok(res.finished);
     assert.deepEqual(boardDiff(r, after), []);
     times[label] = res.t;
   }
-  assert.ok(times.ai < times.human * 0.85, JSON.stringify(times));
-  assert.ok(times.aiUlt <= 3500, JSON.stringify(times));
+  // the motion around the readable band is shorter for the AI
+  assert.ok(times.ai - holds.ai < (times.human - holds.human) * 0.95, JSON.stringify({ times, holds }));
+  assert.ok(times.aiUlt <= 4500, JSON.stringify(times));
 });

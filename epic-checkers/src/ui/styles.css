@@ -298,10 +298,8 @@
   border-radius: var(--radius);
   box-shadow: inset 0 1px 0 var(--panel-hi), 0 8px 24px rgba(0, 0, 0, 0.28);
 }
-.q-high .card {
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-}
+/* (no backdrop-filter: a blur of the live canvas behind every card cost a full-screen GPU pass per
+   frame; the panels are opaque enough on their own) */
 
 .row {
   padding: 13px 14px;
@@ -551,14 +549,16 @@
   animation: none;
   display: none;
 }
+/* transform only (was `left`: layout + paint on every frame). 190% of the button = 422% of the
+   45%-wide streak. */
 @keyframes btnShine {
   0%,
   55% {
-    left: -60%;
+    transform: translateX(0) skewX(-20deg);
   }
   85%,
   100% {
-    left: 130%;
+    transform: translateX(422%) skewX(-20deg);
   }
 }
 .btn--ghost .btn__bg {

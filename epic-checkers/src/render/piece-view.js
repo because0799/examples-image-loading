@@ -123,9 +123,11 @@ export class PieceView extends Container {
       this.ring.visible = this.isKing;
       this.ring.alpha = 1;
       this.ring.scale.set(1);
-      this.glow.tint = this.isKing ? mixHex(EPIC.side[this.color], EPIC.gold, 0.25) : EPIC.side[this.color];
+      // energy colour of the side from the skin (the player's chosen colour, or the default)
+      const side = skin.sideColor ? skin.sideColor(this.color) : EPIC.side[this.color];
+      this.glow.tint = this.isKing ? mixHex(side, EPIC.gold, 0.25) : side;
       this.glow.visible = true;
-      this.coreGlow.tint = this.isKing ? mixHex(EPIC.gold, 0xffffff, 0.2) : mixHex(EPIC.side[this.color], 0xffffff, 0.25);
+      this.coreGlow.tint = this.isKing ? mixHex(EPIC.gold, 0xffffff, 0.2) : mixHex(side, 0xffffff, 0.25);
     } else {
       this.glow.visible = false;
       this.coreGlow.visible = false;

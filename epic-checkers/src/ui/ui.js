@@ -27,6 +27,9 @@
 //   'skip'                    «Пропустить» chip tapped during a cinematic (see hud.setSkippable)
 //   'theme'('epic'|'classic') theme of the UI changed (EPIC toggle or hud.setup)
 //   'board-rect'(DOMRect)     #board-slot moved/resized or hud.lanes() changed (orientation change, fonts ...)
+//   'occluded'(bool)          an opaque full-screen sheet (settings / rules from the pause menu) covers
+//                             the whole canvas (true) or no longer does (false, as it starts closing):
+//                             wire it to renderer.setOccluded(on)
 //   'screen'(name)            a screen became current
 
 import './styles.css';
@@ -34,11 +37,13 @@ import './screens.css';
 import './hud.css';
 import './overlays.css';
 import './epic.css';
+import './perf.css';
 
 import { VARIANTS } from '../engine/index.js';
 import { h, feedback, fitAll } from './dom.js';
 import { t, setLang, getLang } from './i18n.js';
-import { loadSettings, saveSettings, StatsStore } from './storage.js';
+import { loadSettings, saveSettings, sanitizeSettings, hapticPattern, presetPatch, StatsStore } from './storage.js';
+import { createToastStack, readMs } from './toasts.js';
 import { createTitle } from './screens/title.js';
 import { createMenu } from './screens/menu.js';
 import { createSetup } from './screens/setup.js';
@@ -61,8 +66,31 @@ const SCREENS = {
 const DEPTH = { title: 0, menu: 1, setup: 2, settings: 2, rules: 2, stats: 2, game: 3 };
 const SCREEN_MS = 420;
 const OVERLAY_MS = 320;
-const BACK_EXIT_MS = 2000; // second Android back press within this window exits the app
+const BACK_EXIT_MIN_MS = 2000; // second Android back press within the toast's lifetime exits the app
 const IMPACT_MS = { min: 40, max: 400, def: 110 };
+
+function currentQualityClass(root) {
+  const cl = root.classList;
+  return ['low', 'medium', 'high'].find((x) => cl.contains(`q-${x}`)) || null;
+}
+
+function setQualityClass(root, q) {
+  const cl = root.classList;
+  for (const x of ['high', 'medium', 'low']) if (x !== q && cl.contains(`q-${x}`)) cl.remove(`q-${x}`);
+  if (!cl.contains(`q-${q}`)) cl.add(`q-${q}`);
+}
+
+/** DOM-side guess of the 'auto' quality until the controller reports its pick. */
+function guessQuality() {
+  try {
+    const n = globalThis.navigator || {};
+    const cores = Number(n.hardwareConcurrency) || 8;
+    const mem = Number(n.deviceMemory) || 8;
+    return cores <= 4 || mem <= 3 ? 'medium' : 'high';
+  } catch (e) {
+    return 'high';
+  }
+}
 
 const sameParams = (a = {}, b = {}) => {
   const ka = Object.keys(a);
@@ -93,12 +121,18 @@ export class UI {
     this._toastsEl = h('div.ui-toasts', { 'aria-live': 'polite' });
     this._flashEl = h('div.ui-flash', { 'aria-hidden': 'true' });
     root.append(this._screensEl, this._overlaysEl, this._toastsEl, this._flashEl);
+    this._toastStack = createToastStack(this._toastsEl, {
+      max: 2,
+      textTime: () => this.settings.textTime,
+      epic: () => this._epic,
+    });
 
     this._game = createGameScreen(this);
     this.hud = this._game.hud;
 
     this._applyThemeClasses();
     this._applyQuality();
+    this._applySettingsClasses();
 
     // first user gesture unlocks WebAudio
     this._unlock = () => {
@@ -166,10 +200,14 @@ export class UI {
     }
   }
 
+  /** UI haptics, gated by settings.haptics ('off' | 'light' shortens pulses | 'strong'). */
   haptic(pattern) {
-    if (!this.settings.vibration || !this.native || typeof this.native.vibrate !== 'function') return;
+    if (!this.native || typeof this.native.vibrate !== 'function') return;
+    const level = this.settings.haptics || (this.settings.vibration === false ? 'off' : 'strong');
+    const p = hapticPattern(pattern, level);
+    if (p == null) return;
     try {
-      this.native.vibrate(pattern);
+      this.native.vibrate(p);
     } catch (e) {
       /* ignore */
     }
@@ -203,29 +241,90 @@ export class UI {
   }
 
   // ------------------------------------------------------------------ settings
-  /** Mutates the live settings object, saves it and emits 'settings'. `_live: true` skips saving. */
-  updateSettings(patch) {
+  /**
+   * Mutates the live settings object, saves it and emits 'settings'. `_live: true` skips saving
+   * (slider drags). patch.fx is merged into settings.fx (same object); `haptics` and the legacy
+   * `vibration` flag stay in sync; every field is validated and settings.preset is re-derived (any
+   * change of a preset-controlled field makes it 'custom'). patch.preset = 'max' | 'balanced' |
+   * 'calm' | 'battery' applies that preset.
+   */
+  updateSettings(patch = {}) {
     const live = !!patch._live;
     const p = { ...patch };
     delete p._live;
-    const prevLang = this.settings.lang;
-    const prevQuality = this.settings.quality;
-    Object.assign(this.settings, p);
-    if (!live) saveSettings(this.settings);
-    if ('sfxVolume' in p && this.audio && this.audio.setSfxVolume) this.audio.setSfxVolume(p.sfxVolume);
-    if ('musicVolume' in p && this.audio && this.audio.setMusicVolume) this.audio.setMusicVolume(p.musicVolume);
-    if (p.quality && p.quality !== prevQuality) this._applyQuality();
-    if (p.lang && p.lang !== prevLang) {
-      setLang(p.lang);
+    const s = this.settings;
+    const prevLang = s.lang;
+    const prevQuality = s.quality;
+    if (p.preset && p.preset !== 'custom') Object.assign(p, presetPatch(p.preset) || {});
+    if ('vibration' in p && !('haptics' in p)) {
+      // an old reader toggled the boolean flag
+      p.haptics = p.vibration ? (s.haptics && s.haptics !== 'off' ? s.haptics : 'strong') : 'off';
+    }
+    const fxPatch = p.fx && typeof p.fx === 'object' ? p.fx : null;
+    delete p.fx;
+    delete p.preset;
+    Object.assign(s, p);
+    if (!s.fx || typeof s.fx !== 'object' || Object.isFrozen(s.fx)) s.fx = { ...(s.fx || {}) };
+    if (fxPatch) Object.assign(s.fx, fxPatch);
+    // validate in place (keeps the identity of settings, settings.fx and settings.lastConfig)
+    const clean = sanitizeSettings(s);
+    for (const [k, v] of Object.entries(clean)) {
+      if (k === 'fx') Object.assign(s.fx, v);
+      else if (k === 'lastConfig' && s.lastConfig && typeof s.lastConfig === 'object' && !Object.isFrozen(s.lastConfig)) Object.assign(s.lastConfig, v);
+      else s[k] = v;
+    }
+    if (!live) saveSettings(s);
+    if ('sfxVolume' in p && this.audio && this.audio.setSfxVolume) this.audio.setSfxVolume(s.sfxVolume);
+    if ('musicVolume' in p && this.audio && this.audio.setMusicVolume) this.audio.setMusicVolume(s.musicVolume);
+    if (s.quality !== prevQuality) this._applyQuality();
+    this._applySettingsClasses();
+    if (this.hud && typeof this.hud.applySettings === 'function') this.hud.applySettings();
+    if (s.lang !== prevLang) {
+      setLang(s.lang);
       this._rebuildForLang();
     }
-    this.emit('settings', this.settings);
+    this.emit('settings', s);
   }
 
+  /** Re-applies the settings-driven CSS classes (idempotent; also callable by the controller). */
+  applySettings() {
+    this._applyQuality();
+    this._applySettingsClasses();
+  }
+
+  /**
+   * Graphics quality class of the DOM (q-high | q-medium | q-low). An explicit settings.quality is
+   * used as is. With 'auto' the level the app picked wins: ui.setEffectiveQuality(q), or the class
+   * the perf manager already put on the root; a device guess only until then.
+   */
   _applyQuality() {
-    const q = this.settings.quality || 'high';
-    this.root.classList.remove('q-high', 'q-medium', 'q-low');
-    this.root.classList.add(`q-${q}`);
+    const pref = this.settings.quality || 'auto';
+    const q = pref === 'auto' ? this._effectiveQuality || currentQualityClass(this.root) || guessQuality() : pref;
+    setQualityClass(this.root, q);
+  }
+
+  /** The quality actually in use (controller: 'auto' pick or adaptive step-down). */
+  setEffectiveQuality(q) {
+    if (!['high', 'medium', 'low'].includes(q)) return;
+    this._effectiveQuality = q;
+    setQualityClass(this.root, q);
+  }
+
+  /** 'high' | 'medium' | 'low' in use right now (the root's q-* class is the DOM's truth). */
+  get effectiveQuality() {
+    const cur = currentQualityClass(this.root);
+    if (cur) return cur;
+    const pref = this.settings.quality || 'auto';
+    return pref === 'auto' ? this._effectiveQuality || guessQuality() : pref;
+  }
+
+  _applySettingsClasses() {
+    const s = this.settings;
+    const fx = s.fx || {};
+    const cl = this.root.classList;
+    cl.toggle('is-battery', !!s.battery);
+    // photosensitivity: no flickering DOM effects either (perf.css)
+    cl.toggle('no-flashes', fx.flashes === false);
   }
 
   // ------------------------------------------------------------------ theme
@@ -256,6 +355,7 @@ export class UI {
   }
 
   _flash(epic) {
+    if (this.settings.fx && this.settings.fx.flashes === false) return;
     const el = this._flashEl;
     el.className = 'ui-flash';
     void el.offsetWidth;
@@ -368,6 +468,13 @@ export class UI {
       close: (instant = false) => {
         const i = this._overlays.indexOf(entry);
         if (i >= 0) this._overlays.splice(i, 1);
+        if (entry.onClose) {
+          try {
+            entry.onClose();
+          } catch (e) {
+            /* ignore */
+          }
+        }
         el.classList.remove('is-open');
         el.classList.add('is-closing');
         if (instant) el.remove();
@@ -487,7 +594,32 @@ export class UI {
     });
     entry.rebuild = () => entry.setContent(build());
     entry.onTheme = () => api && api.onTheme && api.onTheme(this._epic);
+    // once fully open the sheet is opaque and covers the whole canvas: the renderer may stop
+    // presenting behind it ('occluded' event); it comes back as soon as the sheet starts to close
+    entry._opaqueT = setTimeout(() => {
+      if (!this._overlays.includes(entry)) return;
+      entry.el.classList.add('is-opaque');
+      this._syncOcclusion();
+    }, OVERLAY_MS + 60);
+    entry.onClose = () => {
+      clearTimeout(entry._opaqueT);
+      entry.el.classList.remove('is-opaque');
+      this._syncOcclusion();
+    };
     return entry;
+  }
+
+  /** Emits 'occluded'(bool) when an opaque full-screen sheet starts / stops covering the canvas. */
+  _syncOcclusion() {
+    const on = this._overlays.some((o) => o.kind === 'sheet' && o.el.classList.contains('is-opaque'));
+    if (on === !!this._occluded) return;
+    this._occluded = on;
+    this.emit('occluded', on);
+  }
+
+  /** Is an opaque UI sheet covering the whole canvas right now? */
+  get occluded() {
+    return !!this._occluded;
   }
 
   /**
@@ -558,20 +690,22 @@ export class UI {
     });
   }
 
-  /** Small toast (game screen: inside the board area; elsewhere: top of the screen). */
+  /**
+   * Small toast (game screen: inside the board area; elsewhere: top of the screen). Readable:
+   * at least readMs(text) (opts.duration can only make it longer); toasts stack instead of
+   * replacing each other.
+   */
   toast(text, opts = {}) {
     if (this._screen && this._screen.name === 'game') {
       this.hud.toast(text, opts);
       return;
     }
-    const epic = opts.epic != null ? opts.epic : this._epic;
-    const node = h('div.toast', { class: epic ? 'toast--epic' : '' }, epic ? h('span.toast__slash') : null, h('span.toast__text', text));
-    this._toastsEl.appendChild(node);
-    while (this._toastsEl.children.length > 2) this._toastsEl.removeChild(this._toastsEl.firstChild);
-    setTimeout(() => {
-      node.classList.add('is-out');
-      setTimeout(() => node.remove(), 450);
-    }, opts.duration || 1900);
+    this._toastStack.show(text, opts);
+  }
+
+  /** Minimum readable time (ms) of a text at the current settings.textTime. */
+  readMs(text) {
+    return readMs(text, this.settings.textTime);
   }
 
   // ------------------------------------------------------------------ Android back
@@ -592,12 +726,15 @@ export class UI {
   /** Root screens: the first back press only warns, a second one within 2 s lets the app exit. */
   _backToExit() {
     const now = Date.now();
-    if (this._backArmedAt && now - this._backArmedAt <= BACK_EXIT_MS) {
+    if (this._backArmedAt && now - this._backArmedAt <= (this._backExitMs || BACK_EXIT_MIN_MS)) {
       this._backArmedAt = 0;
       return false;
     }
     this._backArmedAt = now;
-    this.toast(t('toast.pressBackAgain'), { duration: BACK_EXIT_MS });
+    const text = t('toast.pressBackAgain');
+    // the second press counts while the warning is on screen
+    this._backExitMs = Math.max(BACK_EXIT_MIN_MS, this.readMs(text));
+    this.toast(text, { duration: this._backExitMs });
     this.haptic(12);
     return true;
   }
@@ -605,10 +742,14 @@ export class UI {
   // ------------------------------------------------------------------ impact frame
   /**
    * Manga impact frame on the DOM HUD for `ms` (clamped 40..400): an inverted negative, then a
-   * crushed grey frame, then back to normal. Skipped on quality 'low'. Safe to call repeatedly.
+   * crushed grey frame, then back to normal. Only on (effective) quality 'high', never with
+   * settings.battery or settings.fx.flashes === false. Safe to call repeatedly.
    */
   flashImpact(ms = IMPACT_MS.def) {
-    if ((this.settings.quality || 'high') === 'low') return;
+    const s = this.settings;
+    // a filter on the whole UI root is a full-screen GPU pass: high quality only, never in battery
+    // mode or with flashes off (photosensitivity)
+    if (this.effectiveQuality !== 'high' || s.battery || (s.fx && s.fx.flashes === false)) return;
     const d = Math.max(IMPACT_MS.min, Math.min(IMPACT_MS.max, Number(ms) || IMPACT_MS.def));
     const cl = this.root.classList;
     clearTimeout(this._impactT1);

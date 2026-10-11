@@ -10,6 +10,18 @@ import {
   SETTINGS_KEY,
   STATS_KEY,
   emptyStats,
+  DEFAULT_FX,
+  PRESETS,
+  PRESET_IDS,
+  presetPatch,
+  detectPreset,
+  hapticPattern,
+  cleanPlayerName,
+  migrateSettings,
+  ENERGY_COLORS,
+  PLAYER_COLORS,
+  QUALITY_AUTO_KEY,
+  SETTINGS_VERSION,
 } from '../../src/ui/storage.js';
 import { TITLES } from '../../src/ui/titles.js';
 
@@ -29,17 +41,51 @@ const game = (o = {}) => ({
 });
 
 test('DEFAULT_SETTINGS has the contract defaults and is frozen', () => {
-  assert.equal(DEFAULT_SETTINGS.lang, 'ru');
-  assert.equal(DEFAULT_SETTINGS.sfxVolume, 0.8);
-  assert.equal(DEFAULT_SETTINGS.musicVolume, 0.5);
-  assert.equal(DEFAULT_SETTINGS.vibration, true);
-  assert.equal(DEFAULT_SETTINGS.announcer, true);
-  assert.equal(DEFAULT_SETTINGS.quality, 'high');
-  assert.equal(DEFAULT_SETTINGS.showMoves, true);
-  assert.equal(DEFAULT_SETTINGS.animSpeed, 1);
-  assert.ok(DEFAULT_SETTINGS.lastConfig);
-  assert.ok(Object.isFrozen(DEFAULT_SETTINGS));
-  assert.ok(Object.isFrozen(DEFAULT_SETTINGS.lastConfig));
+  const d = DEFAULT_SETTINGS;
+  assert.equal(d.lang, 'ru');
+  assert.equal(d.sfxVolume, 0.8);
+  assert.equal(d.musicVolume, 0.5);
+  assert.equal(d.announcer, true);
+  assert.equal(d.haptics, 'strong');
+  assert.equal(d.vibration, true);
+  assert.equal(d.quality, 'auto');
+  assert.equal(d.battery, false);
+  assert.equal(d.animSpeed, 1);
+  assert.equal(d.textTime, 1.5);
+  assert.equal(d.opponentFx, 'full');
+  assert.equal(d.aiPace, 'normal');
+  assert.equal(d.showMoves, true);
+  assert.equal(d.showLastMove, true);
+  assert.equal(d.showCoords, true);
+  assert.equal(d.playerName, '');
+  assert.equal(d.playerColor, 'auto');
+  assert.equal(d.preset, 'balanced');
+  assert.deepEqual(
+    { ...d.fx },
+    {
+      shake: 1,
+      flashes: true,
+      slowmo: true,
+      camera: true,
+      cutins: true,
+      kanji: true,
+      brags: 'normal',
+      turnBanners: true,
+      combo: true,
+      particles: 1,
+      auras: true,
+      backdrop: true,
+      vsIntro: true,
+    },
+  );
+  assert.ok(d.lastConfig);
+  assert.ok(Object.isFrozen(d));
+  assert.ok(Object.isFrozen(d.lastConfig));
+  assert.ok(Object.isFrozen(d.fx));
+  assert.deepEqual(Object.keys(ENERGY_COLORS), ['cyan', 'gold', 'green', 'violet', 'orange', 'pink']);
+  assert.equal(ENERGY_COLORS.cyan, '#29E6FF');
+  assert.equal(ENERGY_COLORS.pink, '#FF4FD8');
+  assert.deepEqual([...PLAYER_COLORS], ['auto', 'cyan', 'gold', 'green', 'violet', 'orange', 'pink']);
 });
 
 test('loadSettings returns a fresh mutable copy of defaults on empty storage', () => {
@@ -48,7 +94,9 @@ test('loadSettings returns a fresh mutable copy of defaults on empty storage', (
   assert.deepEqual(s, JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
   s.lang = 'en';
   s.lastConfig.level = 5;
+  s.fx.shake = 0;
   assert.equal(DEFAULT_SETTINGS.lang, 'ru');
+  assert.equal(DEFAULT_SETTINGS.fx.shake, 1);
   assert.equal(DEFAULT_SETTINGS.lastConfig.level, 3);
 });
 
@@ -92,19 +140,162 @@ test('corrupt or hostile settings fall back field by field', () => {
   assert.deepEqual(loadSettings(st), sanitizeSettings(null));
   st.setItem(
     SETTINGS_KEY,
-    JSON.stringify({ lang: 'de', sfxVolume: 7, musicVolume: 'loud', vibration: 'yes', quality: 'ultra', animSpeed: 3, lastConfig: { variantId: '../../x', level: 9, humanColor: 2, mode: 'online' } }),
+    JSON.stringify({
+      v: SETTINGS_VERSION,
+      lang: 'de',
+      sfxVolume: 7,
+      musicVolume: 'loud',
+      haptics: 'max',
+      vibration: 'yes',
+      quality: 'ultra',
+      battery: 1,
+      animSpeed: 'fast',
+      textTime: null,
+      opponentFx: 'none',
+      aiPace: 9,
+      showCoords: 'no',
+      playerName: { evil: true },
+      playerColor: '#fff',
+      preset: 'godmode',
+      fx: { shake: 99, flashes: 'off', brags: 'always', particles: -3, vsIntro: 0 },
+      lastConfig: { variantId: '../../x', level: 9, humanColor: 2, mode: 'online' },
+    }),
   );
   const s = loadSettings(st);
   assert.equal(s.lang, 'ru');
   assert.equal(s.sfxVolume, 1);
   assert.equal(s.musicVolume, 0.5);
+  assert.equal(s.haptics, 'strong');
   assert.equal(s.vibration, true);
-  assert.equal(s.quality, 'high');
+  assert.equal(s.quality, 'auto');
+  assert.equal(s.battery, false);
   assert.equal(s.animSpeed, 1);
+  assert.equal(s.textTime, 1.5);
+  assert.equal(s.opponentFx, 'full');
+  assert.equal(s.aiPace, 'normal');
+  assert.equal(s.showCoords, true);
+  assert.equal(s.playerName, '');
+  assert.equal(s.playerColor, 'auto');
+  assert.equal(s.fx.shake, 1.5, 'clamped to the range');
+  assert.equal(s.fx.particles, 0.25, 'clamped to the range');
+  assert.equal(s.fx.flashes, true);
+  assert.equal(s.fx.brags, 'normal');
+  assert.equal(s.fx.vsIntro, true);
+  assert.equal(s.preset, 'custom', 'the label follows the actual values');
   assert.equal(s.lastConfig.variantId, 'russian');
   assert.equal(s.lastConfig.level, 3);
   assert.equal(s.lastConfig.humanColor, 1);
   assert.equal(s.lastConfig.mode, 'ai');
+});
+
+test('old (v1) saves migrate: vibration -> haptics, old default quality -> auto, animSpeed kept', () => {
+  const v1 = { lang: 'en', sfxVolume: 0.4, musicVolume: 0.2, vibration: false, announcer: false, quality: 'high', showMoves: false, animSpeed: 2 };
+  const st = new MemoryStorage({ [SETTINGS_KEY]: JSON.stringify(v1) });
+  const s = loadSettings(st);
+  assert.equal(s.haptics, 'off');
+  assert.equal(s.vibration, false);
+  assert.equal(s.quality, 'auto', "'high' was the old default, not a choice");
+  assert.equal(s.animSpeed, 2);
+  assert.equal(s.textTime, 1.5);
+  assert.equal(s.lang, 'en');
+  assert.equal(s.showMoves, false);
+  assert.equal(s.announcer, false);
+  assert.deepEqual(s.fx, { ...DEFAULT_FX });
+  assert.equal(s.preset, 'custom', 'animSpeed 2 is not a preset value');
+  // vibration: true -> strong
+  st.setItem(SETTINGS_KEY, JSON.stringify({ vibration: true }));
+  assert.equal(loadSettings(st).haptics, 'strong');
+  // a quality the user picked stays; one the app picked (quality-auto key) becomes auto
+  st.setItem(SETTINGS_KEY, JSON.stringify({ quality: 'low' }));
+  assert.equal(loadSettings(st).quality, 'low');
+  st.setItem(SETTINGS_KEY, JSON.stringify({ quality: 'medium' }));
+  st.setItem(QUALITY_AUTO_KEY, 'medium');
+  assert.equal(loadSettings(st).quality, 'auto');
+  // in-between speeds snap to the nearest option
+  st.setItem(SETTINGS_KEY, JSON.stringify({ animSpeed: 1.4, textTime: 2.6 }));
+  const snapped = loadSettings(st);
+  assert.equal(snapped.animSpeed, 1.5);
+  assert.equal(snapped.textTime, 3);
+  // saved v2 files are not migrated again: an explicit 'high' stays 'high'
+  const s2 = loadSettings(new MemoryStorage());
+  s2.quality = 'high';
+  const st2 = new MemoryStorage();
+  saveSettings(s2, st2);
+  assert.equal(JSON.parse(st2.getItem(SETTINGS_KEY)).v, SETTINGS_VERSION);
+  assert.equal(loadSettings(st2).quality, 'high');
+  assert.ok(!('v' in loadSettings(st2)), 'the live object carries no version field');
+  assert.equal(migrateSettings(null), null);
+});
+
+test('haptics and the legacy vibration flag stay in sync', () => {
+  assert.equal(sanitizeSettings({ haptics: 'off' }).vibration, false);
+  assert.equal(sanitizeSettings({ haptics: 'light' }).vibration, true);
+  assert.equal(sanitizeSettings({ haptics: 'light', vibration: false }).haptics, 'light', 'haptics wins');
+  assert.equal(sanitizeSettings({ vibration: false }).haptics, 'off');
+});
+
+test('presets: every preset is complete, detectable and matches the contract', () => {
+  assert.deepEqual([...PRESET_IDS], ['max', 'balanced', 'calm', 'battery']);
+  for (const id of PRESET_IDS) {
+    const patch = presetPatch(id);
+    assert.deepEqual(Object.keys(patch.fx).sort(), Object.keys(DEFAULT_FX).sort(), id);
+    const s = sanitizeSettings({ ...DEFAULT_SETTINGS, ...patch });
+    assert.equal(s.preset, id);
+    assert.equal(detectPreset(s), id);
+    // the patch is a fresh object
+    patch.fx.shake = 0.1;
+    assert.notEqual(PRESETS[id].fx.shake, 0.1);
+  }
+  assert.equal(presetPatch('nope'), null);
+  // balanced = defaults
+  assert.equal(detectPreset(DEFAULT_SETTINGS), 'balanced');
+  const max = PRESETS.max;
+  assert.equal(max.textTime, 2);
+  assert.equal(max.fx.shake, 1.3);
+  assert.equal(max.fx.particles, 1.5);
+  assert.equal(max.fx.brags, 'often');
+  for (const k of ['flashes', 'slowmo', 'camera', 'cutins', 'kanji', 'turnBanners', 'combo', 'auras', 'backdrop', 'vsIntro']) assert.equal(max.fx[k], true, k);
+  const calm = PRESETS.calm;
+  assert.deepEqual(
+    [calm.textTime, calm.animSpeed, calm.fx.shake, calm.fx.flashes, calm.fx.slowmo, calm.fx.turnBanners, calm.fx.particles, calm.fx.brags],
+    [2, 0.75, 0.4, false, false, false, 0.6, 'rare'],
+  );
+  const bat = PRESETS.battery;
+  assert.deepEqual(
+    [bat.quality, bat.battery, bat.fx.backdrop, bat.fx.particles, bat.fx.auras, bat.fx.flashes, bat.fx.shake],
+    ['low', true, false, 0.4, false, false, 0.6],
+  );
+  // changing any controlled field turns the label into 'custom'; changing it back restores it
+  const s = sanitizeSettings({ ...DEFAULT_SETTINGS, ...presetPatch('calm') });
+  s.fx.kanji = false;
+  assert.equal(detectPreset(s), 'custom');
+  s.fx.kanji = true;
+  assert.equal(detectPreset(s), 'calm');
+  s.textTime = 3;
+  assert.equal(detectPreset(s), 'custom');
+  // non-preset fields do not matter
+  const b = sanitizeSettings({ playerName: 'Макс', playerColor: 'gold', haptics: 'off', lang: 'en', showCoords: false });
+  assert.equal(b.preset, 'balanced');
+});
+
+test('player name is cleaned and limited to 16 characters', () => {
+  assert.equal(cleanPlayerName('  Макс  '), 'Макс');
+  assert.equal(cleanPlayerName('a\u0000b\nc\u202Ed'), 'ab cd');
+  assert.equal(cleanPlayerName('Очень-очень длинное имя игрока'), 'Очень-очень длин');
+  assert.equal(Array.from(cleanPlayerName('🔥'.repeat(20))).length, 16);
+  assert.equal(cleanPlayerName(42), '');
+  assert.equal(sanitizeSettings({ playerName: '   ' }).playerName, '');
+});
+
+test('hapticPattern: off -> null, light shortens pulses, strong keeps them', () => {
+  assert.equal(hapticPattern(30, 'off'), null);
+  assert.equal(hapticPattern(30, 'strong'), 30);
+  assert.ok(hapticPattern(30, 'light') < 30);
+  assert.ok(hapticPattern(6, 'light') >= 4);
+  assert.deepEqual(hapticPattern([30, 40, 60], 'strong'), [30, 40, 60]);
+  const l = hapticPattern([30, 40, 60], 'light');
+  assert.equal(l[1], 40, 'pauses are kept');
+  assert.ok(l[0] < 30 && l[2] <= 28);
 });
 
 test('StatsStore records wins/losses/draws per variant and persists', () => {

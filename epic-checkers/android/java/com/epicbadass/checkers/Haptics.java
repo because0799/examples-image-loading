@@ -52,6 +52,15 @@ final class Haptics {
 
     /** @param spec "40" or "[40,30,80]" (web convention: first entry vibrates). */
     void vibrate(String spec) {
+        vibrate(spec, -1);
+    }
+
+    /**
+     * @param spec      "40" or "[40,30,80]" (web convention: first entry vibrates)
+     * @param amplitude 1..255 vibration strength, or -1 for the device default. Ignored where the
+     *                  vibrator has no amplitude control (or below API 26).
+     */
+    void vibrate(String spec, int amplitude) {
         if (!available()) return;
         long[] web = parse(spec);
         if (web == null) return;
@@ -65,15 +74,19 @@ final class Haptics {
             cancel();
             return;
         }
+        int amp = amplitude;
+        if (amp > 255) amp = 255;
+        if (amp != -1 && amp < 1) amp = 1;
+        if (amp != -1 && !hasAmplitudeControl()) amp = -1;
         try {
             if (web.length == 1) {
-                vibrateOnce(web[0]);
+                vibrateOnce(web[0], amp);
             } else {
                 // Android waveform timings start with an OFF segment: prepend a 0 ms delay.
                 long[] timings = new long[web.length + 1];
                 timings[0] = 0L;
                 System.arraycopy(web, 0, timings, 1, web.length);
-                vibrateWaveform(timings);
+                vibrateWaveform(timings, amp);
             }
         } catch (RuntimeException e) {
             Log.w(TAG, "vibrate failed: " + spec, e);
@@ -89,19 +102,35 @@ final class Haptics {
         }
     }
 
+    private boolean hasAmplitudeControl() {
+        if (Build.VERSION.SDK_INT < 26 || vibrator == null) return false;
+        try {
+            return vibrator.hasAmplitudeControl();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     @SuppressWarnings("deprecation")
-    private void vibrateOnce(long ms) {
+    private void vibrateOnce(long ms, int amp) {
         if (Build.VERSION.SDK_INT >= 26) {
-            dispatch(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE));
+            dispatch(VibrationEffect.createOneShot(ms, amp > 0 ? amp : VibrationEffect.DEFAULT_AMPLITUDE));
         } else {
             vibrator.vibrate(ms, gameAudioAttributes());
         }
     }
 
     @SuppressWarnings("deprecation")
-    private void vibrateWaveform(long[] timings) {
+    private void vibrateWaveform(long[] timings, int amp) {
         if (Build.VERSION.SDK_INT >= 26) {
-            dispatch(VibrationEffect.createWaveform(timings, -1));
+            if (amp > 0) {
+                // timings alternate off / on (index 0 is the leading 0 ms delay)
+                int[] amps = new int[timings.length];
+                for (int i = 0; i < timings.length; i++) amps[i] = (i % 2 == 1) ? amp : 0;
+                dispatch(VibrationEffect.createWaveform(timings, amps, -1));
+            } else {
+                dispatch(VibrationEffect.createWaveform(timings, -1));
+            }
         } else {
             vibrator.vibrate(timings, -1, gameAudioAttributes());
         }

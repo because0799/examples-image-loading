@@ -126,3 +126,64 @@ test('request() resolves when the overlay SHOWS (not when it ends) and never rej
   });
   assert.equal(bad, null);
 });
+
+// ---------------------------------------------------------------- readability rule (60 % of the readable time)
+test('a newer banner never cuts a caption before it has been readable for 60 % of its time', async () => {
+  const { st, make, run, shown, clock } = setup({ top: null, bottom: { y: 556, h: 92 } });
+  st.request('bottom', 'caption', { h: 86, read: 3000, make: make('caption', 'bottom', 86, 3500) });
+  await run(800);
+  st.request('bottom', 'banner', { h: 42, read: 1500, make: make('banner', 'bottom', 42, 2000), maxWait: 4000 });
+  await run(800);
+  assert.equal(shown.length, 1, 'at 1.6 s (53 %) the caption is still being read');
+  await run(1200);
+  assert.equal(shown.length, 2, 'cut once 60 % (1.8 s) has passed');
+  const cap = shown[0];
+  assert.ok(cap.end - cap.at >= 0.6 * 3000, `caption readable ${cap.end - cap.at} ms`);
+  assert.ok(shown[1].at >= cap.end, 'no overlap');
+  assert.ok(clock.realNow > 0);
+});
+
+test('captions never cut anything: they wait for the occupant to end (or are dropped after maxWait)', async () => {
+  const { st, make, run, shown } = setup({ top: null, bottom: { y: 556, h: 92 } });
+  st.request('bottom', 'caption', { h: 86, read: 100, make: make('caption', 'bottom', 86, 1500) });
+  await run(200);
+  const second = st.request('bottom', 'caption', { h: 86, read: 2000, make: make('caption', 'bottom', 86, 1500), maxWait: 3000 });
+  await run(1000);
+  assert.equal(shown.length, 1, 'the first caption keeps its full time');
+  await run(800);
+  assert.ok(await second);
+  assert.equal(shown.length, 2);
+  assert.ok(shown[1].at >= shown[0].end);
+});
+
+test('centre channel: whenFree() waits for a band to be readable, cuts it, then resolves; maxWait bounds it', async () => {
+  const { st, run, clock } = setup({ top: null, bottom: null });
+  const band = overlay(clock, 6000);
+  st.claim('center', 'big', band, null, 3000);
+  assert.equal(st.isFree('center', 'big'), false);
+  let freeAt = -1;
+  const t0 = clock.realNow;
+  st.whenFree('center', 'big', { maxWait: 10000 }).then(() => (freeAt = clock.realNow - t0));
+  await run(1500);
+  assert.equal(freeAt, -1, 'still young (< 60 % of 3 s)');
+  await run(900);
+  assert.ok(freeAt >= 1800 && freeAt < 2600, `free after ${freeAt} ms`);
+  // maxWait: a cinematic never stalls behind a long text
+  const band2 = overlay(clock, 9000);
+  st.claim('center', 'big', band2, null, 8000);
+  let at2 = -1;
+  const t1 = clock.realNow;
+  st.whenFree('center', 'big', { maxWait: 500 }).then(() => (at2 = clock.realNow - t1));
+  await run(1000);
+  assert.ok(at2 >= 500 && at2 < 900, `forced after ${at2} ms`);
+});
+
+test('claim() only cuts what has been readable long enough', async () => {
+  const { st, make, run, shown } = setup({ top: { y: 90, h: 92 }, bottom: null });
+  st.request('top', 'caption', { h: 86, read: 2000, make: make('caption', 'top', 86, 2500) });
+  await run(300);
+  st.claim('top', 'combo', new Promise(() => {}), () => true, 2000);
+  await run(100);
+  assert.equal(shown[0].end, undefined, 'the young caption was not cut by the combo claim');
+  assert.equal(st.isFree('top', 'banner'), false);
+});

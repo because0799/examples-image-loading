@@ -64,8 +64,19 @@
 //   setLang('ru'|'en') (default labels), setQuality(q) (FX only — call renderer.setQuality too),
 //   preload(texts?), destroy(), stats() (debug: live effects / particles / nodes / attached filters)
 //   new FX({ renderer, quality, mode, textures }) — `textures` lets several FX share one FxTextures.
+//
+// Personal settings (SETTINGS CONTRACT): fx.applySettings(settings) keeps the LIVE settings object
+// and every primitive reads it at use time (prefs.js):
+//   fx.shake 0..1.5 (0 = never shakes) · fx.flashes false → no impact frames / white flashes /
+//   chromatic / bloom pulses / flickering lightning (a gentle dim pulse marks the hit instead) ·
+//   fx.slowmo false → no slow-mo / hit-stop · fx.kanji false → no onomatopoeia (kanji, menacing) ·
+//   fx.cutins false → no cut-in bands · fx.combo false → no combo counter · fx.auras false → no
+//   auras (running ones go out at once) · fx.particles 0.25..1.5 multiplies every particle count
+//   and the cap (on top of the quality caps) · textTime → fx.readMs(text, kind) (readable hold).
+// Side colours come from renderer.sideColor(side) (the player's chosen energy colour) when the
+// renderer has it, else from the palette.
 
-import { Container, Sprite, Graphics, Texture, TilingSprite } from 'pixi.js';
+import { Container, Sprite, Graphics, Texture, TilingSprite, MeshSimple } from 'pixi.js';
 import { Ease } from '../render/tween.js';
 import { mixHex, shadeHex } from '../render/canvas.js';
 import { EPIC, CLASSIC } from '../render/palette.js';
@@ -73,6 +84,9 @@ import { FxTextures } from './textures.js';
 import { ParticleSystem, emitBurst } from './particles.js';
 import { FilterManager } from './filters.js';
 import * as Anime from './anime.js';
+import { fxPref, readMs as readMsOf, epicSideColor } from './prefs.js';
+
+export { toHex, epicSideColor } from './prefs.js';
 
 export const QUALITY = {
   high: { cap: 1500, mul: 1, lines: 1 },
@@ -81,6 +95,10 @@ export const QUALITY = {
 };
 
 const TAU = Math.PI * 2;
+/** live shockwave rings per quality (each may also hold a distortion filter pass) */
+const MAX_RINGS = { high: 6, medium: 4, low: 3 };
+/** segments of a slash strip mesh */
+const STRIP_N = 34;
 const KIND_LIFE = {
   spark: 650, stars: 1000, dust: 900, shards: 1100, embers: 1500, energy: 850, petals: 3300,
   confetti: 2600, smoke: 1700, fire: 750, debris: 850, rain: 950,
@@ -114,6 +132,10 @@ export class FX {
     this._heavy = { rgb: 0, zoom: 0, bloom: 0 };
     /** optional screen rect (CSS px) kept free of the DOM HUD; kanji are clamped into it */
     this.safeRect = null;
+    /** live settings object (applySettings); null = contract defaults */
+    this.settings = null;
+    /** settings.fx.particles applied to the caps / counts */
+    this._pmul = 1;
 
     // containers inside the renderer's FX layers
     const L = renderer.layers;
@@ -150,9 +172,51 @@ export class FX {
   setQuality(q) {
     this.quality = QUALITY[q] ? q : 'high';
     this.q = QUALITY[this.quality];
-    this.particles.setCap(this.q.cap);
     this.filters.setQuality(this.quality);
-    this.env.mul = this.q.mul;
+    this._applyParticles();
+  }
+
+  /**
+   * Personal settings (live object, read again at use time). Idempotent and cheap: call it on
+   * every 'settings' event. Auras switched off go out at once.
+   */
+  applySettings(settings) {
+    if (settings && typeof settings === 'object') this.settings = settings;
+    this._applyParticles();
+    if (!this.pref('auras')) this.stopAuras();
+    return this;
+  }
+
+  /** One settings.fx field (validated, contract default when unset). */
+  pref(key) {
+    return fxPref(this.settings, key);
+  }
+
+  /** Full-screen flashes allowed (settings.fx.flashes — photosensitivity)? */
+  get flashesOn() {
+    return fxPref(this.settings, 'flashes');
+  }
+
+  /** Readable hold (ms) of a text overlay for the current settings.textTime (prefs.readMs). */
+  readMs(text, kind) {
+    return readMsOf(text, kind, this.settings);
+  }
+
+  /** Particle count multiplier: quality × settings.fx.particles. */
+  get pq() {
+    return this.q.mul * this._pmul;
+  }
+
+  _applyParticles() {
+    const pm = fxPref(this.settings, 'particles');
+    this._pmul = pm;
+    this.particles.setCap(Math.max(40, Math.round(this.q.cap * Math.min(1.5, pm))));
+    this.env.mul = this.q.mul * pm;
+  }
+
+  /** Stop every running aura (they fade out quickly). */
+  stopAuras() {
+    for (const a of this._auras) if (!a.dead && !a.fading) a.fading = 1;
   }
 
   setLang(lang) {
@@ -167,9 +231,12 @@ export class FX {
     return this.epic ? EPIC : CLASSIC;
   }
 
-  /** Colour for a side (1 / -1) in the current mode; passes hex colours through. */
+  /**
+   * Colour for a side (1 / -1) in the current mode; passes hex colours through. Epic colours come
+   * from renderer.sideColor(side) (the player's chosen energy colour), else from the palette.
+   */
   sideColor(side) {
-    if (side === 1 || side === -1) return this.epic ? EPIC.side[side] : CLASSIC.gold;
+    if (side === 1 || side === -1) return this.epic ? epicSideColor(this.renderer, side) : CLASSIC.gold;
     return side;
   }
 
@@ -222,7 +289,7 @@ export class FX {
 
   _tick(gdt, rdt) {
     this.env.sq = this.sq;
-    this._safe('particles', () => this.particles.update(gdt, rdt));
+    this._safe('particles', this._stepParticles, gdt, rdt);
     const list = this._effects;
     const n = list.length;
     for (let i = 0; i < n; i++) {
@@ -260,15 +327,26 @@ export class FX {
     let w = 0;
     for (let i = 0; i < list.length; i++) if (!list[i].done) list[w++] = list[i];
     list.length = w;
-    this._safe('auras', () => this._updateAuras(gdt, rdt));
-    this._safe('filters', () => this.filters.update());
-    this._safe('time', () => this._applyTime());
+    if (this._auras.length) this._safe('auras', this._updateAuras, gdt, rdt);
+    this._safe('filters', this._stepFilters, gdt, rdt);
+    this._safe('time', this._applyTime, gdt, rdt);
   }
 
-  /** Run one stage of the frame; a throw is logged (rate-limited) and the frame goes on (F2). */
-  _safe(where, fn) {
+  _stepParticles(gdt, rdt) {
+    this.particles.update(gdt, rdt);
+  }
+
+  _stepFilters() {
+    this.filters.update();
+  }
+
+  /**
+   * Run one stage of the frame (a method of this FX, no per-frame closure); a throw is logged
+   * (rate-limited) and the frame goes on (F2).
+   */
+  _safe(where, fn, a, b) {
     try {
-      fn();
+      fn.call(this, a, b);
     } catch (err) {
       const now = this.clock.realNow;
       if (!(now - (this._errAt || -1e9) < 1000)) {
@@ -390,6 +468,8 @@ export class FX {
 
   // ===================================================================== shockwave
   shockwave(x, y, o = {}) {
+    // cap: a ×5 chain reaction would otherwise stack a dozen rings (+ distortion passes)
+    if ((this._rings || 0) >= MAX_RINGS[this.quality]) return this._done();
     const sq = this.sq;
     const strength = o.strength != null ? o.strength : 1;
     const epic = this.epic;
@@ -432,6 +512,7 @@ export class FX {
       f.speed = (R * z0 * 1.1) / ((duration * 0.75) / 1000);
       f.time = 0;
     }
+    this._rings = (this._rings || 0) + 1;
     return this._run({
       duration,
       update: (dt, t, k) => {
@@ -462,6 +543,7 @@ export class FX {
         }
       },
       end: () => {
+        this._rings = Math.max(0, (this._rings || 1) - 1);
         if (h) h.release();
         this._dispose(box);
       },
@@ -470,6 +552,8 @@ export class FX {
 
   // ===================================================================== flash / vignette
   flash(color = 0xffffff, o = {}) {
+    // flashes off (photosensitivity): a slow, faint colour wash instead of a flash
+    if (!this.flashesOn) return this.gentlePulse(color, { alpha: Math.min(0.12, (o.alpha != null ? o.alpha : 0.3) * 0.3), duration: Math.max(420, (o.duration || 200) * 1.8) });
     const scr = this.renderer.screen;
     const s = this._sprite(Texture.WHITE, this.c.overlay);
     s.anchor.set(0);
@@ -540,6 +624,15 @@ export class FX {
     });
   }
 
+  /**
+   * Non-flashing stand-in for flashes / impact frames (settings.fx.flashes off): a soft vignette
+   * that eases in and out over ≥ 400 ms, never brighter than `alpha`.
+   */
+  gentlePulse(color = 0x000000, o = {}) {
+    const dur = Math.max(400, o.duration || 420);
+    return this.vignette(color === 0xffffff ? 0x000000 : color, { alpha: o.alpha != null ? o.alpha : 0.22, duration: dur, fade: dur / 2, realtime: o.realtime });
+  }
+
   vignette(color = 0x000000, o = {}) {
     const scr = this.renderer.screen;
     const s = this._sprite(this.textures.vignette(), this.c.overlay);
@@ -564,8 +657,10 @@ export class FX {
   }
 
   // ===================================================================== camera / time
+  /** Camera shake, scaled by settings.fx.shake (0 = never shakes). */
   shake(intensity = 0.3, duration = 380, opts) {
-    const k = this.epic ? 1 : 0.35;
+    const k = (this.epic ? 1 : 0.35) * fxPref(this.settings, 'shake');
+    if (!(k > 0) || !(intensity > 0)) return this._done();
     this.renderer.camera.shake(intensity * k, duration, opts);
     return this._wait(duration, true);
   }
@@ -579,6 +674,8 @@ export class FX {
    */
   slowMo(scale = 0.3, duration = 600, o = {}) {
     if (!this.epic) scale = Math.max(0.5, scale);
+    // settings.fx.slowmo off: no slow motion (a call that brings time back to 1 still works)
+    if (scale < 1 && !fxPref(this.settings, 'slowmo')) return this._done();
     const T = this._time;
     const now = this.clock.realNow;
     T.sFrom = this._slowValue(now);
@@ -594,6 +691,7 @@ export class FX {
 
   /** Freeze game time for `ms` real milliseconds (composes with slowMo, see above). */
   hitStop(ms = 90) {
+    if (!fxPref(this.settings, 'slowmo')) return this._done();
     if (!this.epic) ms *= 0.5;
     const T = this._time;
     T.hitUntil = Math.max(T.hitUntil, this.clock.realNow + ms);
@@ -635,7 +733,7 @@ export class FX {
 
   // ===================================================================== full-screen filters
   chromatic(strength = 1, duration = 320, o = {}) {
-    if (!this.epic || !this.filters.can('rgb')) return this._done();
+    if (!this.epic || !this.flashesOn || !this.filters.can('rgb')) return this._done();
     const scr = this.renderer.screen;
     const px0 = 7 * strength * Math.max(0.8, Math.min(1.8, Math.min(scr.width, scr.height) / 390));
     return this._heavyRun('rgb', duration, o, (h, gk) => {
@@ -669,6 +767,7 @@ export class FX {
   }
 
   bloomPulse(strength = 1, duration = 520, o = {}) {
+    if (!this.flashesOn) return this._done();
     const s = this.epic ? strength : strength * 0.35;
     if (!this.filters.can('bloom')) {
       if (!this.epic) return this._done();
@@ -716,6 +815,11 @@ export class FX {
   }
 
   // ===================================================================== lightning
+  /**
+   * Jagged bolt between two points. Two (epic) bolt shapes are tessellated ONCE when the effect
+   * starts and the effect flips between them (no per-frame Graphics rebuild). With
+   * settings.fx.flashes off the bolt does not flicker and the sky does not flash.
+   */
   lightning(x1, y1, x2, y2, o = {}) {
     const epic = this.epic;
     const sq = this.sq;
@@ -723,11 +827,9 @@ export class FX {
     const duration = o.duration || (epic ? 440 : 360);
     const branches = epic ? (o.branches != null ? o.branches : 3) : 0;
     const wmul = (o.width || 1) * Math.max(0.7, Math.min(1.6, sq / 42));
-    if (epic && o.sky) this.renderer.lightning();
+    const flicker = epic && this.flashesOn;
+    if (epic && o.sky && this.flashesOn) this.renderer.lightning();
     const box = this._box(this.c.worldUnder, 'lightning');
-    const g = new Graphics();
-    g.blendMode = 'add';
-    box.addChild(g);
     const ends = [];
     if (epic) {
       for (const [px, py, s] of [[x1, y1, 0.9], [x2, y2, 1.3]]) {
@@ -743,7 +845,7 @@ export class FX {
         ends.push(d, c);
       }
     }
-    const build = () => {
+    const build = (g) => {
       const paths = [];
       const main = boltPath(x1, y1, x2, y2, 5, epic ? 0.2 : 0.08);
       paths.push({ pts: main, w: 1 });
@@ -756,9 +858,7 @@ export class FX {
         const by = main[i * 2 + 1];
         const a = ang + (Math.random() < 0.5 ? -1 : 1) * rand(0.35, 0.85);
         const bl = len * rand(0.18, 0.42);
-        const ex = bx + Math.cos(a) * bl;
-        const ey = by + Math.sin(a) * bl;
-        const bp = boltPath(bx, by, ex, ey, 4, 0.25);
+        const bp = boltPath(bx, by, bx + Math.cos(a) * bl, by + Math.sin(a) * bl, 4, 0.25);
         paths.push({ pts: bp, w: 0.55 });
         if (Math.random() < 0.4) {
           const j = Math.floor((bp.length / 2) * rand(0.3, 0.7));
@@ -767,7 +867,6 @@ export class FX {
           paths.push({ pts: boltPath(bp[j * 2], bp[j * 2 + 1], bp[j * 2] + Math.cos(a2) * l2, bp[j * 2 + 1] + Math.sin(a2) * l2, 3, 0.25), w: 0.35 });
         }
       }
-      g.clear();
       const layers = epic
         ? [
             [20, color, 0.09],
@@ -779,28 +878,41 @@ export class FX {
             [4, color, 0.18],
             [1.4, mixHex(color, 0xffffff, 0.5), 0.85],
           ];
-      for (const [w, c, a] of layers) {
+      for (const [w, c, al] of layers) {
         for (const p of paths) {
           const pts = p.pts;
           g.moveTo(pts[0], pts[1]);
           for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i], pts[i + 1]);
-          g.stroke({ width: Math.max(0.6, w * p.w * wmul), color: c, alpha: a, join: 'round', cap: 'round' });
+          g.stroke({ width: Math.max(0.6, w * p.w * wmul), color: c, alpha: al, join: 'round', cap: 'round' });
         }
       }
     };
-    build();
+    const shapes = [];
+    for (let i = 0; i < (flicker ? 2 : 1); i++) {
+      const g = new Graphics();
+      g.blendMode = 'add';
+      build(g);
+      g.visible = i === 0;
+      box.addChild(g);
+      shapes.push(g);
+    }
     const FLICK = [1, 0.25, 1, 0.85, 0.35, 1, 0.7, 1, 0.5];
     let regen = 0;
+    let cur = 0;
     let fi = 0;
     let ft = 0;
     if (epic) this.emit('spark', x2, y2, { count: 14, color, speed: 0.9 });
     return this._run({
       duration,
       update: (dt, t, k) => {
-        regen -= dt;
-        if (regen <= 0 && k < 0.7) {
-          regen = epic ? 55 : 80;
-          build();
+        if (shapes.length > 1) {
+          regen -= dt;
+          if (regen <= 0 && k < 0.7) {
+            regen = 55;
+            shapes[cur].visible = false;
+            cur = (cur + 1) % shapes.length;
+            shapes[cur].visible = true;
+          }
         }
         ft += dt;
         if (ft > 32) {
@@ -808,19 +920,23 @@ export class FX {
           fi = (fi + 1) % FLICK.length;
         }
         const fade = k < 0.6 ? 1 : Math.pow(1 - (k - 0.6) / 0.4, 1.5);
-        const a = (epic ? FLICK[fi] : 1) * fade;
-        g.alpha = a;
-        for (const s of ends) s.alpha = a * 0.9;
+        const a = (flicker ? FLICK[fi] : 1) * fade;
+        shapes[cur].alpha = a;
+        for (const sp of ends) sp.alpha = a * 0.9;
       },
       end: () => this._dispose(box),
     });
   }
 
   // ===================================================================== slash
+  /**
+   * Crescent sword streak. Each colour layer is a pooled triangle-strip mesh whose vertex buffer is
+   * rewritten in place every frame (no Graphics tessellation, no allocation per frame).
+   */
   slash(x, y, angle = -0.6, o = {}) {
     const epic = this.epic;
     const sq = this.sq;
-    const color = o.color != null ? o.color : epic ? 0x29e6ff : CLASSIC.goldLight;
+    const color = o.color != null ? o.color : epic ? this.sideColor(1) : CLASSIC.goldLight;
     const L = (o.length != null ? o.length : epic ? 3.4 : 2) * sq;
     const W = (o.width != null ? o.width : 1) * sq * (epic ? 0.42 : 0.13);
     const duration = o.duration || (epic ? 380 : 320);
@@ -837,10 +953,6 @@ export class FX {
     const base = Math.atan2(ny, nx);
     const dirSign = side; // sweep direction along the chord
     const box = this._box(this.c.worldOver, 'slash');
-    const g = new Graphics();
-    g.blendMode = 'add';
-    box.addChild(g);
-    const N = 34;
     const layers = epic
       ? [
           { out: 0.55, inn: 1.9, color, alpha: 0.32 },
@@ -851,10 +963,14 @@ export class FX {
           { out: 0.3, inn: 1.3, color, alpha: 0.35 },
           { out: 0, inn: 0.55, color: 0xffffff, alpha: 0.85 },
         ];
-    const arcPt = (u, r) => {
-      const th = base + dirSign * (-phi + 2 * phi * u);
-      return [cx + Math.cos(th) * r, cy + Math.sin(th) * r];
-    };
+    const meshes = layers.map((ly) => {
+      const m = this._strip();
+      m.tint = ly.color;
+      m.alpha = ly.alpha;
+      m.visible = false;
+      box.addChild(m);
+      return m;
+    });
     let flare = null;
     if (epic) {
       flare = this._sprite(this.textures.frame('flare'), box);
@@ -863,25 +979,31 @@ export class FX {
       flare.rotation = angle;
       flare.alpha = 0;
     }
+    const N = STRIP_N;
     let lastHead = 0;
     const draw = (tail, head, wm) => {
-      g.clear();
-      if (head - tail < 0.004 || wm <= 0.01) return;
-      for (const ly of layers) {
-        const pts = [];
-        const inner = [];
+      const show = head - tail >= 0.004 && wm > 0.01;
+      for (let l = 0; l < layers.length; l++) {
+        const m = meshes[l];
+        m.visible = show;
+        if (!show) continue;
+        const ly = layers[l];
+        const v = m.vertices;
         for (let i = 0; i <= N; i++) {
           const u = tail + ((head - tail) * i) / N;
-          const v = i / N;
-          const prof = (Math.pow(v, 1.2) * Math.pow(1 - v, 0.35)) / 0.437;
+          const k = i / N;
+          const prof = (Math.pow(k, 1.2) * Math.pow(1 - k, 0.35)) / 0.437;
           const w = W * wm * prof;
-          const o1 = arcPt(u, R + w * ly.out);
-          const o2 = arcPt(u, R - w * ly.inn);
-          pts.push(o1[0], o1[1]);
-          inner.push(o2[0], o2[1]);
+          const th = base + dirSign * (-phi + 2 * phi * u);
+          const c = Math.cos(th);
+          const sn = Math.sin(th);
+          const ro = R + w * ly.out;
+          const ri = R - w * ly.inn;
+          v[i * 2] = cx + c * ro;
+          v[i * 2 + 1] = cy + sn * ro;
+          v[(N + 1 + i) * 2] = cx + c * ri;
+          v[(N + 1 + i) * 2 + 1] = cy + sn * ri;
         }
-        for (let i = inner.length - 2; i >= 0; i -= 2) pts.push(inner[i], inner[i + 1]);
-        g.poly(pts, true).fill({ color: ly.color, alpha: ly.alpha });
       }
     };
     return this._run({
@@ -898,14 +1020,49 @@ export class FX {
           flare.scale.set(((L * 2.4) / 128) * (0.6 + 0.4 * fk), (sq * 0.5 * (1 - fk * 0.7)) / 24);
         }
         if (epic && head > lastHead + 0.02 && head < 0.99) {
-          const p = arcPt(head, R - W * 0.3);
-          const tang = base + dirSign * (-phi + 2 * phi * head) + (Math.PI / 2) * dirSign;
-          this.emit('spark', p[0], p[1], { count: 2, color, angle: tang, spread: 0.8, speed: 0.6, life: 0.7 });
+          const th = base + dirSign * (-phi + 2 * phi * head);
+          const r0 = R - W * 0.3;
+          const tang = th + (Math.PI / 2) * dirSign;
+          this.emit('spark', cx + Math.cos(th) * r0, cy + Math.sin(th) * r0, { count: 2, color, angle: tang, spread: 0.8, speed: 0.6, life: 0.7 });
           lastHead = head;
         }
       },
-      end: () => this._dispose(box),
+      end: () => {
+        for (const m of meshes) this._freeStrip(m);
+        this._dispose(box);
+      },
     });
+  }
+
+  /** A pooled additive triangle strip of STRIP_N + 1 segments (outer row, then inner row). */
+  _strip() {
+    let m = this._strips && this._strips.pop();
+    if (!m || m.destroyed) {
+      const N = STRIP_N;
+      const n = (N + 1) * 2;
+      const idx = new Uint32Array(N * 6);
+      for (let i = 0; i < N; i++) {
+        const o0 = i;
+        const o1 = i + 1;
+        const i0 = N + 1 + i;
+        const i1 = N + 2 + i;
+        idx.set([o0, o1, i0, i0, o1, i1], i * 6);
+      }
+      m = new MeshSimple({ texture: Texture.WHITE, vertices: new Float32Array(n * 2), uvs: new Float32Array(n * 2).fill(0.5), indices: idx });
+      m.label = 'fx-strip';
+    }
+    m.blendMode = 'add';
+    m.visible = true;
+    m.alpha = 1;
+    return m;
+  }
+
+  _freeStrip(m) {
+    if (!m || m.destroyed) return;
+    m.removeFromParent();
+    if (!this._strips) this._strips = [];
+    if (this._strips.length < 16) this._strips.push(m);
+    else m.destroy();
   }
 
   // ===================================================================== pillar of light
@@ -1030,7 +1187,7 @@ export class FX {
         }
         // rising particles inside the beam (+ helix)
         if (struck && k < 0.85) {
-          emitAcc += (dt / 1000) * (epic ? 60 : 14) * this.q.mul;
+          emitAcc += (dt / 1000) * (epic ? 60 : 14) * this.pq;
           while (emitAcc >= 1) {
             emitAcc -= 1;
             this._pillarParticle(x, y, W, color, spiral);
@@ -1155,11 +1312,11 @@ export class FX {
         const rk = (t / 260) % 1;
         ring.scale.set((R * (1 - Ease.inQuad(rk)) + sq * 0.2) / 56);
         ring.alpha = 0.7 * rk * (this.epic ? 1 : 0.5);
-        acc += (dt / 1000) * (this.epic ? 45 : 12) * this.q.mul;
+        acc += (dt / 1000) * (this.epic ? 45 : 12) * this.pq;
         if (acc >= 1) {
           const n = acc | 0;
           acc -= n;
-          this.emit('energy', x, y, { count: n / this.q.mul, color, inward: true, radius: R / sq, life: 0.8 });
+          this.emit('energy', x, y, { count: n / this.pq, color, inward: true, radius: R / sq, life: 0.8 });
         }
       },
       end: () => this._dispose(box),
@@ -1253,7 +1410,7 @@ export class FX {
     if (!view || view.destroyed) return this._done();
     const epic = this.epic;
     const sq = this.sq;
-    const color = o.color != null ? o.color : epic ? EPIC.side[view.color] || EPIC.white : 0xffffff;
+    const color = o.color != null ? o.color : epic ? this.sideColor(view.color === -1 ? -1 : 1) : 0xffffff;
     const dur = o.duration || 450;
     const spacing = (o.spacing != null ? o.spacing : epic ? 0.3 : 0.45) * sq;
     const alpha0 = o.alpha != null ? o.alpha : epic ? 0.6 : 0.22;
@@ -1329,7 +1486,7 @@ export class FX {
    * embers. Auto-stops when the view is captured/recycled. Returns { stop(), setColor(), setIntensity(), promise }.
    */
   aura(view, o = {}) {
-    if (!view || view.destroyed || !view.auraLayer) {
+    if (!view || view.destroyed || !view.auraLayer || !fxPref(this.settings, 'auras')) {
       return { stop: () => this._done(), setColor() {}, setIntensity() {}, promise: this._done() };
     }
     // one aura per view: replace the previous one
@@ -1466,15 +1623,16 @@ export class FX {
         f.s.alpha = (f.hot ? 0.7 : 0.5 + 0.35 * (0.5 + 0.5 * n1)) * I;
       }
       // trickle of embers / sparkles
+      const pq = this.pq;
       if (I > 0.05 && this.q.mul > 0.4) {
-        a.emitAcc += (gdt / 1000) * (a.epic ? 7 : 2.5) * this.q.mul * I;
+        a.emitAcc += (gdt / 1000) * (a.epic ? 7 : 2.5) * pq * I;
         while (a.emitAcc >= 1) {
           a.emitAcc -= 1;
           const ang = -Math.PI / 2 + (Math.random() - 0.5) * 2.4;
           const px = v.x + Math.cos(ang) * R * 0.9;
           const py = v.y + v.body.y + Math.sin(ang) * R * 0.75;
-          if (a.epic) this.emit('embers', px, py, { count: 1 / this.q.mul, color: a.color, radius: 0.05, speed: 0.8 });
-          else this.emit('stars', px, py, { count: 1 / this.q.mul, color: a.color, radius: 0.05, size: 0.7 });
+          if (a.epic) this.emit('embers', px, py, { count: 1 / pq, color: a.color, radius: 0.05, speed: 0.8 });
+          else this.emit('stars', px, py, { count: 1 / pq, color: a.color, radius: 0.05, size: 0.7 });
         }
       }
     }
@@ -1492,18 +1650,19 @@ export class FX {
       update: (dt, t, k) => {
         const scr = this.renderer.screen;
         const ramp = Math.min(1, t / 300) * (k > 0.8 ? (1 - k) / 0.2 : 1);
-        acc += (dt / 1000) * rateBase * this.q.mul * ramp;
+        const pq = this.pq;
+        acc += (dt / 1000) * rateBase * pq * ramp;
         while (acc >= 1) {
           acc -= 1;
           const x = Math.random() * scr.width;
           if (kind === 'rain') {
-            this.emit('rain', x + scr.height * 0.18, -20, { screen: true, count: 1 / this.q.mul, realtime: o.realtime !== false, color: o.color, life: (scr.height / 844) * 1.1 });
+            this.emit('rain', x + scr.height * 0.18, -20, { screen: true, count: 1 / pq, realtime: o.realtime !== false, color: o.color, life: (scr.height / 844) * 1.1 });
           } else if (kind === 'embers') {
-            this.emit('embers', x, scr.height + 10, { screen: true, count: 1 / this.q.mul, color: o.color, speed: 2.2, life: 2.2, realtime: o.realtime !== false });
+            this.emit('embers', x, scr.height + 10, { screen: true, count: 1 / pq, color: o.color, speed: 2.2, life: 2.2, realtime: o.realtime !== false });
           } else {
             this.emit(kind, x, -16, {
               screen: true,
-              count: 1 / this.q.mul,
+              count: 1 / pq,
               angle: Math.PI / 2,
               spread: 0.6,
               speed: kind === 'petals' ? 0.35 : 0.3,
@@ -1518,7 +1677,9 @@ export class FX {
   }
 
   // ===================================================================== anime (anime.js)
+  /** Manga impact frame; with settings.fx.flashes off a gentle dim pulse marks the hit instead. */
   impactFrame(o = {}) {
+    if (!this.flashesOn) return this.epic ? this.gentlePulse(0x000000, { alpha: 0.28, duration: 420 }) : this._done();
     if (this.epic) this._impactUntil = Math.max(this._impactUntil, this.clock.realNow + (o.duration || 120));
     return Anime.impactFrame(this, o);
   }
@@ -1531,7 +1692,9 @@ export class FX {
     return Anime.speedLines(this, { ...o, style: 'focus' });
   }
 
+  /** Onomatopoeia / kanji pop (settings.fx.kanji). Holds readable for o.hold ms (default readMs). */
   kanji(text, x, y, o = {}) {
+    if (!fxPref(this.settings, 'kanji')) return this._done();
     return Anime.kanji(this, text, x, y, o);
   }
 
@@ -1539,11 +1702,15 @@ export class FX {
     return Anime.banner(this, text, o);
   }
 
+  /** Cut-in band (settings.fx.cutins). */
   cutIn(o = {}) {
+    if (!fxPref(this.settings, 'cutins')) return this._done();
     return Anime.cutIn(this, o);
   }
 
+  /** Combo counter (settings.fx.combo). */
   comboCounter(n, o = {}) {
+    if (!fxPref(this.settings, 'combo')) return this._done();
     return Anime.comboCounter(this, n, o);
   }
 
@@ -1551,7 +1718,9 @@ export class FX {
     return Anime.hideCombo(this);
   }
 
+  /** 「ゴゴゴ」 (an onomatopoeia: settings.fx.kanji). */
   menacing(x, y, o = {}) {
+    if (!fxPref(this.settings, 'kanji')) return this._done();
     return Anime.menacing(this, x, y, o);
   }
 
@@ -1575,6 +1744,7 @@ export class FX {
     this.filters.clear();
     this._resetTime();
     this._impactUntil = 0;
+    this._rings = 0;
     this._heavy = { rgb: 0, zoom: 0, bloom: 0 };
     for (const c of Object.values(this.c)) {
       for (const k of c.children.slice()) this._dispose(k);
@@ -1604,6 +1774,8 @@ export class FX {
     for (const c of Object.values(this.c)) c.destroy({ children: true });
     for (const s of this._spritePool) s.destroy();
     this._spritePool = [];
+    for (const m of this._strips || []) m.destroy();
+    this._strips = [];
     if (this._ownTextures) this.textures.destroy();
   }
 }

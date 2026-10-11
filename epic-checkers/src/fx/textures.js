@@ -603,7 +603,7 @@ export class FxTextures {
     this._textClock = 0;
     this._textPx = 0;
     /** cache limits for lettering: entry count and device-pixel budget (~4 bytes each on the GPU) */
-    this.maxText = 24;
+    this.maxText = 40;
     this.maxTextPixels = 5e6;
     this._buildAtlas();
   }
@@ -986,7 +986,9 @@ export class FxTextures {
   _evictText() {
     const over = () => this._text.size > this.maxText || this._textPx > this.maxTextPixels;
     if (!over()) return;
-    const free = [...this._text.entries()].filter(([, e]) => e.refs === 0).sort((a, b) => a[1].used - b[1].used);
+    const free = [];
+    for (const kv of this._text) if (kv[1].refs === 0) free.push(kv);
+    free.sort((a, b) => a[1].used - b[1].used);
     while (over() && free.length) {
       const [k, e] = free.shift();
       e.tex.destroy(true);

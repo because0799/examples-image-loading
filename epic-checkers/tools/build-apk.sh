@@ -16,6 +16,8 @@
 # installs as an update over the previous one. Created with keytool if missing.
 #
 # Tool locations can be overridden: AAPT, DX, ZIPALIGN, APKSIGNER, JAVAC, KEYTOOL, ANDROID_JAR.
+# Paths too (private builds while others work in the same tree): WWW_DIR (web bundle, default
+# dist/www), APK_BUILD_DIR (staging, default dist/apk-build), APK_OUT (default dist/EpicCheckers.apk).
 
 set -euo pipefail
 
@@ -49,9 +51,9 @@ RES_SRC="$ROOT/android/res"
 KEYSTORE="$ROOT/android/keystore/epic-checkers.jks"
 KEY_ALIAS="epic"
 KEY_PASS="epicbadass"
-WWW="$ROOT/dist/www"
-BUILD="$ROOT/dist/apk-build"
-OUT="$ROOT/dist/EpicCheckers.apk"
+WWW="${WWW_DIR:-$ROOT/dist/www}"
+BUILD="${APK_BUILD_DIR:-$ROOT/dist/apk-build}"
+OUT="${APK_OUT:-$ROOT/dist/EpicCheckers.apk}"
 
 say() { printf '\033[1;35m[apk]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[apk] error:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -82,7 +84,7 @@ need "$KEYTOOL" "install a JDK (8+)"
 # ---------------------------------------------------------------- 1. web bundle
 if [[ "$SKIP_WEB" == 0 ]]; then
   say "building web bundle (node tools/build-web.mjs)"
-  node tools/build-web.mjs
+  if [[ -n "${WWW_DIR:-}" ]]; then node tools/build-web.mjs --out "$WWW"; else node tools/build-web.mjs; fi
 fi
 [[ -f "$WWW/index.html" ]] || die "dist/www/index.html missing - run without --skip-web"
 if [[ "$SKIP_WEB" == 1 && "${ALLOW_STALE_WEB:-0}" != 1 ]]; then

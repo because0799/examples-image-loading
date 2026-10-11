@@ -4,9 +4,11 @@
 // URL parameters (testing / debugging):
 //   ?debug=1                      expose window.__app (see below) + console.error on desync
 //   ?lang=en|ru                   UI language for this session
-//   ?quality=high|medium|low      graphics quality for this session (turns adaptive quality off)
+//   ?quality=auto|high|medium|low graphics quality for this session (a level turns adaptive quality off)
 //   ?adaptive=0                   no automatic quality step-down
-//   ?speed=1|1.5|2                animation speed for this session
+//   ?battery=0|1                  battery saver for this session (30 fps cap …)
+//   ?speed=0.5|0.75|1|1.25|1.5|2  animation speed for this session
+//   ?textTime=1|1.5|2|3           text reading time multiplier for this session
 //   ?fast=1                       AI thinks ~40 ms and moves without the perceived delay (tests)
 //   ?autoskip=1                   skip every cinematic as soon as it starts (tests)
 //   ?screen=game&variant=turkish&mode=ai|pvp|demo&epic=0|1&color=1|-1|0&level=1..5&giveaway=0|1
@@ -15,7 +17,8 @@
 //   (no ?screen: the title screen; an autosaved unfinished game is offered for resumption)
 //
 // window.__app = { game, controller, renderer, fx, director, ui, audio, ai, native, settings,
-//                  stats, quality, startGame(cfg), playPath(path), setPosition(str), state() }
+//                  stats, perf, quality (= perf.adaptive), startGame(cfg), playPath(path),
+//                  setPosition(str), state() }
 
 import * as storage from './ui/storage.js';
 import { UI } from './ui/ui.js';
@@ -28,7 +31,7 @@ import { native } from './platform/native.js';
 import { Controller } from './controller.js';
 import { text } from './controller-text.js';
 import { readSave, clearSave } from './app-save.js';
-import { AdaptiveQuality, weakDevice } from './app-quality.js';
+import { PerfManager } from './app-perf.js';
 import { stateFromString, getVariant } from './engine/index.js';
 import { loc } from './ui/i18n.js';
 
@@ -36,9 +39,6 @@ import { loc } from './ui/i18n.js';
 const DEV = typeof __DEV__ !== 'undefined' && __DEV__;
 const params = new URLSearchParams(location.search);
 const debug = params.get('debug') === '1' || DEV;
-
-const QUALITY_AUTO_KEY = 'epic-checkers.quality-auto'; // quality value chosen by the app, not the user
-const SETTINGS_KEY = storage.SETTINGS_KEY || 'epic-checkers.settings.v1';
 
 const errors = [];
 window.addEventListener('error', (e) => {
@@ -117,49 +117,20 @@ function urlConfig(settings) {
   return cfg;
 }
 
-// ---------------------------------------------------------------- quality bookkeeping
-function lsGet(key) {
-  try {
-    return globalThis.localStorage ? globalThis.localStorage.getItem(key) : null;
-  } catch (e) {
-    return null;
-  }
-}
-
-function lsSet(key, value) {
-  try {
-    if (!globalThis.localStorage) return;
-    if (value == null) globalThis.localStorage.removeItem(key);
-    else globalThis.localStorage.setItem(key, value);
-  } catch (e) {
-    /* storage blocked */
-  }
-}
-
-/** First launch = no settings were ever stored (an unreadable storage counts as "not first"). */
-function firstLaunch() {
-  try {
-    return !!globalThis.localStorage && globalThis.localStorage.getItem(SETTINGS_KEY) == null;
-  } catch (e) {
-    return false;
-  }
-}
-
 async function boot() {
   await waitFonts(2500);
 
   const settings = storage.loadSettings();
   if (params.get('lang') === 'en' || params.get('lang') === 'ru') settings.lang = params.get('lang');
+  // session overrides (tests / debugging)
   const urlQuality = ['high', 'medium', 'low'].includes(params.get('quality')) ? params.get('quality') : null;
-  if (urlQuality) settings.quality = urlQuality;
-  else if (firstLaunch() && weakDevice(navigator)) {
-    // weak phone (≤ 4 cores and ≤ 3 GB RAM): start at medium, once, as an app choice
-    settings.quality = 'medium';
-    storage.saveSettings(settings);
-    lsSet(QUALITY_AUTO_KEY, 'medium');
-  }
+  if (urlQuality || params.get('quality') === 'auto') settings.quality = urlQuality || 'auto';
   const speed = Number(params.get('speed'));
-  if ([1, 1.5, 2].includes(speed)) settings.animSpeed = speed;
+  if ([0.5, 0.75, 1, 1.25, 1.5, 2].includes(speed)) settings.animSpeed = speed;
+  const textTime = Number(params.get('textTime'));
+  if ([1, 1.5, 2, 3].includes(textTime)) settings.textTime = textTime;
+  if (params.has('battery')) settings.battery = params.get('battery') === '1';
+  const quality0 = PerfManager.initialQuality(settings, { urlQuality });
   const directGame = params.get('screen') === 'game';
   const urlCfg = directGame ? urlConfig(settings) : null;
   if (urlCfg) settings.lastConfig = { ...settings.lastConfig, epic: urlCfg.epic };
@@ -170,8 +141,10 @@ async function boot() {
 
   const renderer = new Renderer(document.getElementById('stage'));
   try {
-    // the renderer caps its resolution at min(devicePixelRatio, 2 | 1.5 | 1 by quality)
-    await renderer.init({ quality: settings.quality });
+    // effective quality: an explicit level, or for 'auto' the device default / the level an earlier
+    // adaptive step down chose (app-perf); MSAA is decided here, at init
+    // (battery saver known up front: no texture rebuild right after boot)
+    await renderer.init({ quality: quality0, battery: settings.battery === true });
   } catch (e) {
     bootError(e);
     return;
@@ -182,7 +155,7 @@ async function boot() {
 
   let fx = null;
   try {
-    fx = new FX({ renderer, quality: settings.quality, mode: theme });
+    fx = new FX({ renderer, quality: quality0, mode: theme });
     fx.setLang(settings.lang);
   } catch (e) {
     console.error('[app] FX init failed — continuing without effects', e);
@@ -215,51 +188,35 @@ async function boot() {
       if (hud && typeof hud.setCinematic === 'function') hud.setCinematic(!!on);
     };
     director.hooks.impact = (ms) => {
-      if (!controller.active || controller.quality === 'low') return;
+      // not on 'low', not with the battery saver, never with flashes off (photosensitivity)
+      if (!controller.active || controller.quality === 'low' || settings.battery) return;
+      if (settings.fx && settings.fx.flashes === false) return;
       if (typeof ui.flashImpact === 'function') ui.flashImpact(ms);
     };
   }
 
-  // ------------------------------------------------------------------ graphics quality
-  const uiQualityClass = (q) => {
-    const root = ui.root || document.getElementById('ui');
-    if (!root) return;
-    root.classList.remove('q-high', 'q-medium', 'q-low');
-    root.classList.add(`q-${q}`);
-  };
-  let autoApplying = false;
-  const adaptive = new AdaptiveQuality({
-    enabled: !urlQuality && params.get('adaptive') !== '0',
-    getQuality: () => controller.quality,
-    isActive: () => controller.active && !controller.paused && ui.currentScreen === 'game' && document.visibilityState !== 'hidden' && !native.isPaused,
-    apply: (next) => {
-      // persist only a downgrade of the default / app-chosen quality, never of the user's choice
-      const auto = lsGet(QUALITY_AUTO_KEY);
-      const persist = settings.quality === 'high' || (auto && settings.quality === auto);
-      controller.setQuality(next);
-      if (persist) {
-        autoApplying = true;
-        try {
-          ui.updateSettings({ quality: next });
-        } finally {
-          autoApplying = false;
-        }
-        lsSet(QUALITY_AUTO_KEY, next);
-      } else uiQualityClass(next);
-      console.info(`[app] graphics quality lowered to '${next}' (frames too slow)${persist ? ', saved' : ''}`);
+  // ------------------------------------------------------------------ frame budget + settings
+  // 60 fps cap (30 with the battery saver), 'auto' quality with adaptive step down, ticker
+  // stopped in the background (src/app-perf.js). Then every module gets the settings.
+  const perf = new PerfManager({
+    settings,
+    renderer,
+    controller,
+    ui,
+    urlQuality,
+    adaptive: params.get('adaptive') !== '0',
+    isActive: () => {
+      if (!controller.active || controller.paused || ui.currentScreen !== 'game') return false;
+      if (document.visibilityState === 'hidden' || native.isPaused) return false;
+      // a deliberate slow-mo / hit-stop is not a slow phone
+      const clk = renderer.clock;
+      return clk && clk.scale < 0.9 ? 'skip' : true;
     },
     notify: () => ui.toast(text('toast.qualityLowered'), { tone: 'info' }),
   });
-  controller.onQualitySetting = (q) => {
-    if (!autoApplying) {
-      // the user picked a quality: respect it for this session, and it is no longer an app choice
-      adaptive.disable('user');
-      lsSet(QUALITY_AUTO_KEY, null);
-      uiQualityClass(q);
-    }
-    controller.setQuality(q);
-  };
-  if (renderer.app && renderer.app.ticker) renderer.app.ticker.add((tk) => adaptive.frame(tk.elapsedMS));
+  controller.perf = perf;
+  perf.attach();
+  controller.applySettings(settings);
 
   // ------------------------------------------------------------------ UI events
   ui.on('play', (cfg) => controller.startGame(cfg));
@@ -267,8 +224,14 @@ async function boot() {
   ui.on('hint', () => controller.hint());
   ui.on('resign', (p) => controller.resign(p));
   ui.on('offer-draw', (p) => controller.offerDraw(p));
-  ui.on('pause', () => controller.onPause());
-  ui.on('resume', () => controller.onResume());
+  ui.on('pause', () => {
+    controller.onPause();
+    perf.setDimmed(true);
+  });
+  ui.on('resume', () => {
+    controller.onResume();
+    perf.setDimmed(false);
+  });
   ui.on('menu', () => controller.stopGame());
   ui.on('rematch', () => controller.rematch());
   ui.on('skip', () => {
@@ -287,6 +250,7 @@ async function boot() {
   ui.on('screen', (name) => {
     // any way out of the game screen (menu from pause, game over → menu, …) ends the game
     if (name !== 'game' && controller.active) controller.stopGame();
+    perf.setDimmed(false);
   });
   let laneRaf = 0;
   window.addEventListener('resize', () => {
@@ -303,6 +267,7 @@ async function boot() {
   // Android back (MUX-05): the UI handles it everywhere, incl. «press Back again to exit» on the
   // root screens. With an older UI that exits on the first press, the same rule is applied here.
   let rootBackAt = 0;
+  let uiDoublePress = false; // the UI implements «press Back again» itself (its window, its toast)
   native.setBackHandler(() => {
     const screen = ui.currentScreen;
     const root = screen === 'title' || screen === 'menu';
@@ -311,9 +276,10 @@ async function boot() {
     if (!root || overlay) return handled;
     const now = Date.now();
     if (handled) {
-      rootBackAt = now; // the UI armed its own double press
+      uiDoublePress = true; // the UI armed its own double press
       return true;
     }
+    if (uiDoublePress) return false; // the UI's second press: exit
     if (now - rootBackAt < 3000) return false;
     rootBackAt = now;
     ui.toast(text('toast.pressBackAgain'));
@@ -326,7 +292,7 @@ async function boot() {
     } catch (e) {
       /* ignore */
     }
-    renderer.pause();
+    perf.pause(); // no frames at all in the background
     if (controller.active && controller.phase !== 'over' && !ui.paused) {
       try {
         ui.openPause();
@@ -342,7 +308,7 @@ async function boot() {
     } catch (e) {
       /* ignore */
     }
-    renderer.resume();
+    perf.resume();
   });
 
   // ------------------------------------------------------------------ testing hooks
@@ -361,7 +327,8 @@ async function boot() {
       native,
       settings,
       stats: statsStore,
-      quality: adaptive,
+      perf,
+      quality: perf.adaptive,
       text,
       errors,
       startGame: (cfg) => controller.startGame(cfg),

@@ -115,7 +115,42 @@ export function chamferRectPath(ctx, x, y, w, h, c) {
   ctx.closePath();
 }
 
-/** Add fine monochrome noise (film grain / dithering) to a canvas region. */
+const grainCache = new Map();
+
+/**
+ * Film grain WITHOUT a read-back: fills the region with a cached, tiling noise pattern (white /
+ * black specks at low alpha). getImageData on a large canvas stalls the GPU and can push the
+ * WebView's 2D canvas onto its slow software path; this only ever writes.
+ */
+export function grainPattern(ctx, x, y, w, h, amount = 6, seed = 1, size = 128) {
+  const key = `${amount}|${seed}|${size}`;
+  let tile = grainCache.get(key);
+  if (!tile) {
+    tile = makeCanvas(size, size);
+    const tctx = tile.getContext('2d');
+    const img = tctx.createImageData(size, size);
+    const d = img.data;
+    let s = seed * 1103515245 + 12345;
+    for (let i = 0; i < d.length; i += 4) {
+      s = (s * 1103515245 + 12345) & 0x7fffffff;
+      const n = ((s >> 8) & 255) / 255 - 0.5; // -0.5..0.5
+      const v = n > 0 ? 255 : 0;
+      d[i] = d[i + 1] = d[i + 2] = v;
+      // ± amount/2 levels on a dark surface ≈ |n| · amount / 128 of white / black
+      d[i + 3] = Math.min(255, Math.round(Math.abs(n) * amount * 2.2));
+    }
+    tctx.putImageData(img, 0, 0);
+    grainCache.set(key, tile);
+  }
+  const pat = ctx.createPattern(tile, 'repeat');
+  if (!pat) return;
+  ctx.save();
+  ctx.fillStyle = pat;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+}
+
+/** Add fine monochrome noise (film grain / dithering) to a canvas region (reads the pixels back). */
 export function addGrain(ctx, x, y, w, h, amount = 6, seed = 1) {
   const img = ctx.getImageData(x, y, w, h);
   const d = img.data;

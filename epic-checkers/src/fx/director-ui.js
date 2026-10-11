@@ -10,12 +10,15 @@
 //
 // Every overlay runs on the FX effect runner (fx._run), so fx.clear() removes it and the returned
 // promise has .stop() (used by Director.skip). Overlays default to REAL time (UI-ish punctuation).
+// Text overlays default to their READABLE time (prefs.readMs × settings.textTime): a caption stays
+// ≥ 2.6 s × textTime, a turn banner ≥ 1.5 s × textTime (longer texts: 700 ms + 70 ms per letter).
 
 import { Container, Graphics, Sprite, Texture, TilingSprite, Text } from 'pixi.js';
 import { Ease } from '../render/tween.js';
 import { mixHex, shadeHex } from '../render/canvas.js';
 import { EPIC, CLASSIC } from '../render/palette.js';
 import { titleStyle, subStyle, kanjiStyle } from './anime.js';
+import { readMs } from './prefs.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -35,6 +38,21 @@ function done() {
 /** Overlays need the FX effect runner; a stub / missing FX makes them no-ops. */
 function usable(fx) {
   return !!(fx && typeof fx._run === 'function' && fx.c && fx.textures && fx.renderer);
+}
+
+/** Readable time of an overlay text for fx's settings (prefs.readMs). */
+export function overlayReadMs(fx, text, kind) {
+  return fx && typeof fx.readMs === 'function' ? fx.readMs(text, kind) : readMs(text, kind, fx && fx.settings);
+}
+
+/** Entrance (ms) of a caption / turn banner before its text is fully readable. */
+export const OVERLAY_IN = { caption: 290, banner: 350 };
+/** Exit (ms) of a caption / turn banner. */
+export const OVERLAY_OUT = { caption: 220, banner: 200 };
+
+/** Whole on-screen time of a caption / turn banner whose text must stay readable. */
+export function overlayDuration(fx, text, kind) {
+  return OVERLAY_IN[kind] + overlayReadMs(fx, text, kind === 'banner' ? 'banner' : 'caption') + OVERLAY_OUT[kind];
 }
 
 /** Load font faces for `text` (bounded by timeoutMs). specs: CSS font shorthands. */
@@ -237,7 +255,7 @@ function captionNow(fx, o, P) {
   const W = scr.width;
   const H = scr.height;
   const fr = fx.renderer.frameBounds;
-  const e = { cleanup: [], realtime: o.realtime !== false, duration: o.duration || 2100 };
+  const e = { cleanup: [], realtime: o.realtime !== false, duration: o.duration || overlayDuration(fx, o.text, 'caption') };
   const root = fx._box(fx.c.screenUI, 'director-caption');
   const maxW = Math.min(W - (o.compact ? 16 : 28), 470);
   // lines (wrap to 2 when needed)
@@ -303,7 +321,7 @@ function captionNow(fx, o, P) {
     body.addChild(hair);
   }
   let flash = null;
-  if (epic) {
+  if (epic && fx.flashesOn !== false) {
     flash = new Graphics();
     para(flash, pw, ph, slant, 0xffffff, 1);
     flash.blendMode = 'add';
@@ -383,7 +401,7 @@ function turnNow(fx, o, P) {
   const W = scr.width;
   const H = scr.height;
   const fr = fx.renderer.frameBounds;
-  const e = { cleanup: [], realtime: o.realtime !== false, duration: o.duration || 1050 };
+  const e = { cleanup: [], realtime: o.realtime !== false, duration: o.duration || overlayDuration(fx, o.text, 'banner') };
   const side = o.side === 'top' ? 'top' : 'bottom';
   const root = fx._box(fx.c.screenUI, 'director-turn');
   const ph = size * 1.7;
@@ -457,12 +475,20 @@ function turnNow(fx, o, P) {
 }
 
 // ================================================================================ versus
+/** ms after the start of the VS screen at which both names are fully in. */
+export const VS_TEXT_IN = 560;
+
+/** VS screen hold (ms): the names are in, then stay readable (prefs.readMs, kind 'vs'). */
+export function versusHold(fx, top, bottom) {
+  return VS_TEXT_IN + overlayReadMs(fx, [top && top.name, bottom && bottom.name].filter(Boolean), 'vs');
+}
+
 /**
  * VS screen. opts: { top: fighter, bottom: fighter, label (power label, e.g. 'УРОВЕНЬ СИЛЫ'),
  * holdMs, onClash(), onSplit() } with fighter = { name, sub, color, side (1|-1), power, king,
  * glyph (one kanji painted on the portrait, e.g. 侍 / 神 / 主) }.
- * Timeline (real ms): 0–260 panels slam in · 260 clash (line + 対決 via onClash) · hold ·
- * holdMs exit 300 ms. Resolves when the overlay is gone.
+ * Timeline (real ms): 0–260 panels slam in · 260 clash (line + 対決 via onClash) · names in by
+ * VS_TEXT_IN · readable hold · exit 300 ms. holdMs defaults to versusHold(). Resolves when gone.
  */
 export function versus(fx, o = {}) {
   if (!usable(fx)) {
@@ -484,7 +510,7 @@ function versusNow(fx, o, P) {
   const W = scr.width;
   const H = scr.height;
   const T = fx.textures;
-  const hold = o.holdMs || 1350;
+  const hold = o.holdMs || versusHold(fx, o.top, o.bottom);
   const outMs = 300;
   const dur = hold + outMs;
   const e = { cleanup: [], realtime: true, duration: dur };
@@ -549,7 +575,7 @@ function versusNow(fx, o, P) {
     // portrait: the fighter's disc with an ink-brush ensō and their kanji (侍 / 神 / 主…) painted
     // huge on it — a character, not a generic emblem (EAD-06). Without a glyph: the old emblem.
     const portrait = fx._box(content, 'vs-portrait');
-    const disc = fx._sprite(T.emblem(f.side === -1 ? -1 : 1, { epic: true, king: !!f.king && !f.glyph, size: pSize }), portrait);
+    const disc = fx._sprite(T.emblem(f.side === -1 ? -1 : 1, { epic: true, king: !!f.king && !f.glyph, size: pSize, color: col }), portrait);
     disc.scale.set(1);
     if (f.glyph) {
       const brushSeed = f.side === -1 ? 3 : 8;
@@ -672,11 +698,16 @@ function versusNow(fx, o, P) {
       const pk = clamp01((t - (IN + 220)) / 200);
       p.power.position.set(p.tx + (p.right ? 1 : -1) * (1 - Ease.outCubic(pk)) * W * 0.3, yy);
       p.power.alpha = pk;
-      // power level counts up
+      // power level counts up (the Text is re-rasterised at most every ~66 ms, not every frame)
       const ck = clamp01((t - (IN + 260)) / 700);
-      const val = Math.round((p.f.power || 0) * Ease.outCubic(ck));
-      const label = `${o.label || 'POWER'}: ${val}${ck >= 1 && p.f.powerSuffix ? p.f.powerSuffix : ''}`;
-      if (p.power.text !== label) p.power.text = label;
+      if (ck >= 1 || t - (p.powerAt || -1e9) >= 66) {
+        const val = Math.round((p.f.power || 0) * Ease.outCubic(ck));
+        const label = `${o.label || 'POWER'}: ${val}${ck >= 1 && p.f.powerSuffix ? p.f.powerSuffix : ''}`;
+        if (p.power.text !== label) {
+          p.power.text = label;
+          p.powerAt = t;
+        }
+      }
       p.textBox.alpha = 1 - ke;
     }
     // clash
@@ -691,11 +722,12 @@ function versusNow(fx, o, P) {
     clashFlare.alpha = fk > 0 && fk < 1 ? Math.sin(Math.PI * fk) : 0;
     clashFlare.scale.set((W * 2.4 * (0.4 + 0.6 * fk)) / 128, (W * 0.12 * (1 - fk * 0.6)) / 24);
     if (clashed && ke <= 0) {
-      sparkAcc += (dt / 1000) * 28 * fx.q.mul;
+      const pq = fx.pq || fx.q.mul;
+      sparkAcc += (dt / 1000) * 28 * pq;
       while (sparkAcc >= 1) {
         sparkAcc -= 1;
         const u = (Math.random() - 0.5) * 2 * half * 0.8;
-        fx.emit('spark', cx + ca * u, cy + sa * u, { screen: true, realtime: true, count: 1 / fx.q.mul, color: Math.random() < 0.5 ? o.top.color : o.bottom.color, speed: 0.7 });
+        fx.emit('spark', cx + ca * u, cy + sa * u, { screen: true, realtime: true, count: 1 / pq, color: Math.random() < 0.5 ? o.top.color : o.bottom.color, speed: 0.7 });
       }
     }
     if (!split2 && t >= hold) {

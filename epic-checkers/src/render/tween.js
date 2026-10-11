@@ -15,6 +15,10 @@
 // the slow-mo restores the base. Clock.update() is exception-safe: a throwing task or listener is
 // logged and dropped, the clock keeps running (one bad effect never freezes the game).
 //
+// clock.onActivity (optional fn) is called whenever a tween / wait / animate task or a per-frame
+// listener is added; clock.hasTasks is true while any task is pending. The Renderer uses both to
+// leave its idle frame rate the moment something starts to move.
+//
 // Every tween()/wait() promise has .cancel(finish = false): cancelling resolves the promise with
 // `false` (never rejects, so fire-and-forget code is safe); cancel(true) jumps to the end values
 // first and resolves with `true`. Note that `.then()` returns a plain promise without cancel().
@@ -160,6 +164,17 @@ export class Clock {
     this._autoHandle = 0;
     this._autoLast = 0;
     this._wantsAuto = false;
+
+    /**
+     * Optional activity hook: called whenever a tween / wait / animate task or a per-frame listener
+     * is added (the Renderer uses it to leave its idle frame-rate mode instantly).
+     */
+    this.onActivity = null;
+  }
+
+  /** True while any tween / wait / animate task is pending (cheap: no iteration). */
+  get hasTasks() {
+    return this._tasks.length > 0 || this._incoming.length > 0;
   }
 
   /** Smoothly change the time scale. The transition always runs in real time. */
@@ -270,6 +285,7 @@ export class Clock {
   /** Per-frame listener: fn(gameDeltaMs, realDeltaMs, clock). Returns an unsubscribe function. */
   add(fn, context = null) {
     this._listeners.push({ fn, context, dead: false });
+    this._activity();
     return () => this.remove(fn, context);
   }
 
@@ -378,6 +394,18 @@ export class Clock {
     if (this._iterating) this._incoming.push(task);
     else this._tasks.push(task);
     if (!this._autoHandle && this._wantsAuto) this.startAuto();
+    this._activity();
+  }
+
+  /** @internal notify the activity hook (never throws). */
+  _activity() {
+    const fn = this.onActivity;
+    if (!fn) return;
+    try {
+      fn();
+    } catch (e) {
+      this._report('activity', e);
+    }
   }
 
   /** Number of running tweens/waits (debug). */

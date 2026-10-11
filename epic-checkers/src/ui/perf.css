@@ -1,0 +1,253 @@
+/* ==========================================================================
+   DOM performance tiers. The DOM UI is composited over a WebGL canvas that animates every frame,
+   so everything here is about what the browser must redo per frame.
+   Classes on .ui-root (set by ui.js):
+     q-high | q-medium | q-low   effective graphics quality (settings.quality / ui.setEffectiveQuality)
+     is-battery                  settings.battery (battery saver)
+     no-flashes                  settings.fx.flashes === false (photosensitivity: no flicker at all)
+   Loaded last so it wins over the theme files.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- game screen: always lean
+   The HUD runs no infinite animation except the short "AI is thinking" indicator (transform /
+   opacity only) and has no CSS filter at all (see hud.css / epic.css). */
+.screen--game .act__bg,
+.screen--game .act__icon {
+  filter: none !important;
+}
+
+/* ---------------------------------------------------------------- medium / low / battery:
+   no large blurred shadows (extra raster work and larger layers) */
+.ui-root.q-medium .card,
+.ui-root.q-low .card,
+.ui-root.is-battery .card,
+.ui-root.q-medium .btn__bg,
+.ui-root.q-low .btn__bg,
+.ui-root.is-battery .btn__bg,
+.ui-root.q-medium .vcard__bg,
+.ui-root.q-low .vcard__bg,
+.ui-root.is-battery .vcard__bg,
+.ui-root.q-medium .vcard__board-wrap,
+.ui-root.q-low .vcard__board-wrap,
+.ui-root.is-battery .vcard__board-wrap,
+.ui-root.q-medium .vhero__board,
+.ui-root.q-low .vhero__board,
+.ui-root.is-battery .vhero__board,
+.ui-root.q-medium .icon-btn__bg,
+.ui-root.q-low .icon-btn__bg,
+.ui-root.is-battery .icon-btn__bg,
+.ui-root.q-medium .pp__bg,
+.ui-root.q-low .pp__bg,
+.ui-root.is-battery .pp__bg {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.ui-root.q-medium .pause,
+.ui-root.q-low .pause,
+.ui-root.is-battery .pause,
+.ui-root.q-medium .dlg,
+.ui-root.q-low .dlg,
+.ui-root.is-battery .dlg,
+.ui-root.q-medium .go--classic .go__card,
+.ui-root.q-low .go--classic .go__card,
+.ui-root.is-battery .go--classic .go__card {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+.ui-root.q-medium .toast,
+.ui-root.q-low .toast,
+.ui-root.is-battery .toast {
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
+}
+.ui-root.q-medium .toast--epic,
+.ui-root.q-low .toast--epic,
+.ui-root.is-battery .toast--epic {
+  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.75);
+}
+.ui-root.q-medium .switch.is-on .switch__track,
+.ui-root.q-low .switch.is-on .switch__track,
+.ui-root.is-battery .switch.is-on .switch__track,
+.ui-root.q-medium .seg__thumb,
+.ui-root.q-low .seg__thumb,
+.ui-root.is-battery .seg__thumb,
+.ui-root.q-medium .status__pill,
+.ui-root.q-low .status__pill,
+.ui-root.is-battery .status__pill,
+.ui-root.q-medium .skip-chip,
+.ui-root.q-low .skip-chip,
+.ui-root.is-battery .skip-chip,
+.ui-root.q-medium .title-chip,
+.ui-root.q-low .title-chip,
+.ui-root.is-battery .title-chip,
+.ui-root.q-medium .lvl__opt.is-active,
+.ui-root.q-low .lvl__opt.is-active,
+.ui-root.is-battery .lvl__opt.is-active,
+.ui-root.q-medium .pc.is-active .pc__bg,
+.ui-root.q-low .pc.is-active .pc__bg,
+.ui-root.is-battery .pc.is-active .pc__bg,
+.ui-root.q-medium .go-stat.is-hot,
+.ui-root.q-low .go-stat.is-hot,
+.ui-root.is-battery .go-stat.is-hot,
+.ui-root.q-medium .go-stat.is-gold,
+.ui-root.q-low .go-stat.is-gold,
+.ui-root.is-battery .go-stat.is-gold,
+.ui-root.q-medium .go--epic .go-rec,
+.ui-root.q-low .go--epic .go-rec,
+.ui-root.is-battery .go--epic .go-rec,
+.ui-root.q-medium .go__stamp,
+.ui-root.q-low .go__stamp,
+.ui-root.is-battery .go__stamp,
+.ui-root.q-medium .go-title .tbadge,
+.ui-root.q-low .go-title .tbadge,
+.ui-root.is-battery .go-title .tbadge,
+.ui-root.q-medium .tbadge.is-unlocked,
+.ui-root.q-low .tbadge.is-unlocked,
+.ui-root.is-battery .tbadge.is-unlocked {
+  box-shadow: none;
+}
+.ui-root.q-medium .vcard.is-selected .vcard__bg,
+.ui-root.q-low .vcard.is-selected .vcard__bg,
+.ui-root.is-battery .vcard.is-selected .vcard__bg {
+  box-shadow: 0 0 0 1px var(--cyan, #29e6ff);
+}
+.ui-root.theme-classic.q-medium .vcard.is-selected .vcard__bg,
+.ui-root.theme-classic.q-low .vcard.is-selected .vcard__bg,
+.ui-root.theme-classic.is-battery .vcard.is-selected .vcard__bg {
+  box-shadow: 0 0 0 1px var(--gold);
+}
+.ui-root.q-medium .hp__disc,
+.ui-root.q-low .hp__disc,
+.ui-root.is-battery .hp__disc,
+.ui-root.q-medium .stats-hero__emblem,
+.ui-root.q-low .stats-hero__emblem,
+.ui-root.is-battery .stats-hero__emblem,
+.ui-root.q-medium .tbadge__emblem,
+.ui-root.q-low .tbadge__emblem,
+.ui-root.is-battery .tbadge__emblem,
+.ui-root.q-medium .sw.is-active .sw__chip,
+.ui-root.q-low .sw.is-active .sw__chip,
+.ui-root.is-battery .sw.is-active .sw__chip {
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.6) !important;
+}
+
+/* no CSS filters (each one is a separate GPU pass on every frame) */
+.ui-root.q-medium .btn__bg,
+.ui-root.q-low .btn__bg,
+.ui-root.is-battery .btn__bg,
+.ui-root.q-medium .tile__bg,
+.ui-root.q-low .tile__bg,
+.ui-root.is-battery .tile__bg,
+.ui-root.q-medium .btn__icon,
+.ui-root.q-low .btn__icon,
+.ui-root.is-battery .btn__icon,
+.ui-root.q-medium .tile__icon,
+.ui-root.q-low .tile__icon,
+.ui-root.is-battery .tile__icon,
+.ui-root.q-medium .logo__bolt path,
+.ui-root.q-low .logo__bolt path,
+.ui-root.is-battery .logo__bolt path,
+.ui-root.q-medium .et__bolts path,
+.ui-root.q-low .et__bolts path,
+.ui-root.is-battery .et__bolts path,
+.ui-root.q-medium .go__headline,
+.ui-root.q-low .go__headline,
+.ui-root.is-battery .go__headline {
+  filter: none !important;
+}
+
+/* ---------------------------------------------------------------- medium: only cheap motion
+   (paint-driven loops off: custom-property spin, background-position, box-shadow, clip-path) */
+.ui-root.q-medium .et__border,
+.ui-root.q-low .et__border,
+.ui-root.is-battery .et__border,
+.ui-root.q-medium .epic-toggle.is-on .et__lines,
+.ui-root.q-low .epic-toggle.is-on .et__lines,
+.ui-root.is-battery .epic-toggle.is-on .et__lines,
+.ui-root.q-medium .epic-toggle:not(.is-on) .et__switch,
+.ui-root.q-low .epic-toggle:not(.is-on) .et__switch,
+.ui-root.is-battery .epic-toggle:not(.is-on) .et__switch,
+.ui-root.q-medium .logo__main-txt::after,
+.ui-root.q-low .logo__main-txt::after,
+.ui-root.is-battery .logo__main-txt::after,
+.ui-root.q-medium .theme-epic .logo__main-txt::after,
+.ui-root.q-low .theme-epic .logo__main-txt::after,
+.ui-root.is-battery .theme-epic .logo__main-txt::after {
+  animation: none !important;
+}
+
+/* ---------------------------------------------------------------- low / battery: no decorative loops */
+.ui-root.q-low .deco-kanji,
+.ui-root.is-battery .deco-kanji,
+.ui-root.q-low .ttl__kanji,
+.ui-root.is-battery .ttl__kanji,
+.ui-root.q-low .ttl__rays,
+.ui-root.is-battery .ttl__rays,
+.ui-root.q-low .embers i,
+.ui-root.is-battery .embers i,
+.ui-root.q-low .et__flames i,
+.ui-root.is-battery .et__flames i,
+.ui-root.q-low .et__embers i,
+.ui-root.is-battery .et__embers i,
+.ui-root.q-low .et__bolts path,
+.ui-root.is-battery .et__bolts path,
+.ui-root.q-low .logo__bolt path,
+.ui-root.is-battery .logo__bolt path,
+.ui-root.q-low .logo__glow,
+.ui-root.is-battery .logo__glow,
+.ui-root.q-low .logo__slash,
+.ui-root.is-battery .logo__slash,
+.ui-root.q-low .epic-toggle.is-on .et__kanji,
+.ui-root.is-battery .epic-toggle.is-on .et__kanji,
+.ui-root.q-low .epic-toggle.is-on .et__title,
+.ui-root.is-battery .epic-toggle.is-on .et__title,
+.ui-root.q-low .scr-header__title,
+.ui-root.is-battery .scr-header__title,
+.ui-root.q-low .logo__epic,
+.ui-root.is-battery .logo__epic,
+.ui-root.q-low .btn--primary .btn__shine::after,
+.ui-root.is-battery .btn--primary .btn__shine::after {
+  animation: none !important;
+}
+.ui-root.q-low .embers,
+.ui-root.is-battery .embers,
+.ui-root.q-low .et__embers,
+.ui-root.is-battery .et__embers,
+.ui-root.q-low .btn--primary .btn__shine::after,
+.ui-root.is-battery .btn--primary .btn__shine::after {
+  display: none;
+}
+/* the flames of the EPIC toggle stand still and do not blend (an isolated blend group per flame) */
+.ui-root.q-low .et__flames i,
+.ui-root.is-battery .et__flames i {
+  mix-blend-mode: normal;
+}
+/* game over: the rays stand still (a large rotating layer), no falling particles */
+.ui-root.q-medium .go__rays,
+.ui-root.q-low .go__rays,
+.ui-root.is-battery .go__rays {
+  animation: goRaysIn 0.9s 0.35s ease-out both;
+}
+.ui-root.q-low .go__particles,
+.ui-root.is-battery .go__particles {
+  display: none;
+}
+/* overlays over the running game: the shine runs a couple of times, not forever */
+.ov .btn--primary .btn__shine::after {
+  animation-iteration-count: 2;
+}
+
+/* ---------------------------------------------------------------- photosensitivity: no flicker */
+.ui-root.no-flashes .scr-header__title,
+.ui-root.no-flashes .logo__epic,
+.ui-root.no-flashes .logo__main-txt::after,
+.ui-root.no-flashes .logo__bolt path,
+.ui-root.no-flashes .et__bolts path,
+.ui-root.no-flashes .epic-toggle.is-on .et__title {
+  animation: none !important;
+}
+.ui-root.no-flashes .ui-flash,
+.ui-root.no-flashes .toast__slash {
+  display: none;
+}
+.ui-root.no-flashes.fx-impact,
+.ui-root.no-flashes.fx-impact-b {
+  filter: none;
+}

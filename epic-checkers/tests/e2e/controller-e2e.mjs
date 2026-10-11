@@ -3,7 +3,8 @@
 //   boot watchdog (F3), own combo not skipped by the entry taps (MUX-01), mandatory capture
 //   announced (MUX-09), refused taps explained (MUX-02), draw offer vs AI (RO-4/RTR-02),
 //   game ending under the pause menu (F1), keep-screen-on (F7), autosave + «Продолжить» (F8),
-//   back on the menu (MUX-05), Director lanes + hooks (EAD-15/06/18), adaptive quality + DPR cap.
+//   back on the menu (MUX-05), Director lanes + hooks (EAD-15/06/18).
+//   (settings + frame budget: tests/e2e/settings-e2e.mjs)
 //
 //   node tests/e2e/controller-e2e.mjs [--only <step text>]
 
@@ -215,7 +216,9 @@ try {
   });
 
   await R.step('EAD-15 / EAD-06 / EAD-18: lanes reach the Director, hooks drive the DOM HUD', async () => {
-    const { page, context } = await open(game('variant=russian&mode=ai&color=1&epic=1&fast=1'));
+    // an explicit quality: 'auto' may step down to 'low' on the slow headless GPU, and the DOM
+    // impact frame is (deliberately) skipped on 'low'
+    const { page, context } = await open(game('variant=russian&mode=ai&color=1&epic=1&fast=1&quality=high'));
     await waitState(page, "s.phase === 'human'", 60000);
     await sleep(500);
     const lanes = await page.evaluate(() => window.__app.director.lanes);
@@ -236,40 +239,15 @@ try {
     assert(hooks.on && !hooks.off && hooks.imp, `hooks ${JSON.stringify(hooks)}`);
     // the lanes follow a resize
     await page.setViewportSize({ width: 412, height: 915 });
-    await sleep(900);
+    // (layout → 'board-rect' → syncLanes runs on animation frames: slow on a loaded headless GPU)
+    await page
+      .waitForFunction((y0) => window.__app.director.lanes && window.__app.director.lanes.bottom && window.__app.director.lanes.bottom.y !== y0, lanes.bottom.y, { timeout: 30000, polling: 200 })
+      .catch(() => null);
+    await sleep(300);
     const [l2, f2] = await page.evaluate(() => [window.__app.director.lanes, window.__app.renderer.frameBounds]);
     assert(l2.top && l2.bottom && l2.bottom.y !== lanes.bottom.y, `lanes not recomputed after resize ${JSON.stringify({ lanes, l2 })}`);
     assert(l2.top.y + l2.top.h <= f2.y + 1 && l2.bottom.y >= f2.y + f2.height - 1, `lanes vs new frame ${JSON.stringify({ l2, f2 })}`);
     await context.close();
-  });
-
-  await R.step('performance: adaptive step-down (high → medium, saved, toast once); ?quality= turns it off; DPR ≤ 2', async () => {
-    const { page, context } = await open(game('variant=russian&mode=pvp&epic=1'), { dpr: 3 });
-    await waitState(page, "s.phase === 'human'", 60000);
-    const r0 = await page.evaluate(() => ({ res: window.__app.renderer.resolution, cw: window.__app.renderer.app.canvas.width, w: innerWidth, q: window.__app.controller.quality, on: window.__app.quality.enabled }));
-    assert(r0.res === 2 && r0.cw === r0.w * 2, `resolution capped at 2 on a DPR 3 screen: ${JSON.stringify(r0)}`);
-    assert(r0.on, 'adaptive quality on by default');
-    await page.evaluate(() => {
-      // make the monitor's decision now (headless frames are slow anyway; this keeps the test fast)
-      window.__app.quality.stepDown();
-    });
-    await sleep(400);
-    const r1 = await page.evaluate(() => ({
-      q: window.__app.controller.quality,
-      rq: window.__app.renderer.quality,
-      res: window.__app.renderer.resolution,
-      cls: document.getElementById('ui').className,
-      saved: JSON.parse(localStorage.getItem('epic-checkers.settings.v1') || '{}').quality,
-      toasts: Array.from(document.querySelectorAll('.toast__text')).map((n) => n.textContent),
-    }));
-    assert(r1.q === 'medium' && r1.rq === 'medium' && r1.res === 1.5, `stepped ${JSON.stringify(r1)}`);
-    assert(/q-medium/.test(r1.cls), 'UI quality class');
-    assert(r1.saved === 'medium', 'the default quality downgrade is saved');
-    assert(r1.toasts.length === 1, `one toast: ${r1.toasts}`);
-    await context.close();
-    const c2 = await open(game('variant=russian&mode=pvp&epic=1&quality=high'));
-    assert(!(await c2.page.evaluate(() => window.__app.quality.enabled)), '?quality= disables adaptive quality');
-    await c2.context.close();
   });
 
   await R.step('no page errors', async () => {

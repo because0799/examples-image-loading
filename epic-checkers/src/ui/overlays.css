@@ -12,16 +12,15 @@
   padding: calc(var(--sat) + 14px) calc(var(--sar) + 14px) calc(var(--sab) + 14px) calc(var(--sal) + 14px);
   pointer-events: auto;
 }
+/* No backdrop-filter: blurring the live WebGL canvas behind the pause menu / dialogs is a
+   full-screen GPU pass on every frame (it stalled frames completely on software GL). A darker,
+   vignetted backdrop reads just as well. */
 .ov__backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(6, 4, 3, 0.66);
+  background: radial-gradient(130% 90% at 50% 45%, rgba(6, 4, 3, 0.7), rgba(6, 4, 3, 0.86));
   opacity: 0;
   transition: opacity 0.3s;
-}
-.q-high .ov__backdrop {
-  -webkit-backdrop-filter: blur(5px);
-  backdrop-filter: blur(5px);
 }
 .ov__panel {
   position: relative;
@@ -71,6 +70,10 @@
 }
 .ov--sheet .screen {
   background: radial-gradient(130% 75% at 50% 0%, rgba(70, 46, 24, 0.55), rgba(12, 8, 6, 0.96) 72%), rgba(10, 7, 5, 0.94);
+}
+/* fully open: opaque (the renderer stops presenting the hidden canvas, ui 'occluded') */
+.ov--sheet.is-opaque .screen {
+  background-color: #0a0705;
 }
 
 /* ---------------------------------------------------------------- pause */
@@ -260,13 +263,9 @@
   background: var(--tier-color, #ffd23f);
   color: #1a1208;
 }
+/* a new title glows: a static glow (painted once) instead of an infinite box-shadow animation */
 .go-title .tbadge {
-  animation: titleGlow 1.8s ease-in-out infinite;
-}
-@keyframes titleGlow {
-  50% {
-    box-shadow: 0 0 26px -2px var(--tier-glow);
-  }
+  box-shadow: 0 0 18px -4px var(--tier-glow);
 }
 .go__btns {
   display: grid;
@@ -498,15 +497,18 @@
   position: absolute;
   left: 50%;
   top: 32%;
-  width: 260vmax;
-  height: 260vmax;
-  margin: -130vmax 0 0 -130vmax;
+  /* the visible ray disc ends at ~77vmax: a 156vmax layer (not 260vmax) holds all of it, a third
+     of the area the compositor has to rotate every frame */
+  width: 156vmax;
+  height: 156vmax;
+  margin: -78vmax 0 0 -78vmax;
   z-index: -3;
   background: repeating-conic-gradient(from 0deg, var(--go-a) 0deg 4deg, rgba(0, 0, 0, 0) 4deg 14deg);
   opacity: 0.22;
-  -webkit-mask-image: radial-gradient(circle, #000 0, #000 6%, transparent 42%);
-  mask-image: radial-gradient(circle, #000 0, #000 6%, transparent 42%);
-  animation: spin 40s linear infinite, goRaysIn 0.9s 0.35s ease-out both;
+  -webkit-mask-image: radial-gradient(circle, #000 0, #000 10%, transparent 70%);
+  mask-image: radial-gradient(circle, #000 0, #000 10%, transparent 70%);
+  /* one slow turn (ends where it started: a seamless stop), not an endless loop over the game */
+  animation: spin 40s linear 1, goRaysIn 0.9s 0.35s ease-out both;
 }
 @keyframes goRaysIn {
   from {
@@ -562,20 +564,20 @@
   width: 8px;
   height: 14px;
   background: hsl(var(--hue), 95%, 60%);
-  animation: confFall var(--d) linear var(--delay) infinite;
+  animation: confFall var(--d) linear var(--delay) 2;
 }
 .go__particles .petal {
   width: 12px;
   height: 9px;
   border-radius: 80% 10% 80% 10%;
   background: radial-gradient(circle at 30% 30%, #fff0f5, #ffb7cf 60%, #ff7aa6);
-  animation: confFall var(--d) linear var(--delay) infinite;
+  animation: confFall var(--d) linear var(--delay) 2;
 }
 .go__particles .rain {
   width: 1.5px;
   height: 70px;
   background: linear-gradient(180deg, rgba(160, 190, 230, 0), rgba(160, 190, 230, 0.55));
-  animation: rainFall var(--d) linear var(--delay) infinite;
+  animation: rainFall var(--d) linear var(--delay) 8;
 }
 @keyframes confFall {
   0% {

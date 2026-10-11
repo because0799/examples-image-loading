@@ -81,17 +81,35 @@ test('stage order is fixed (shockwave → zoom → rgb → bloom) and foreign fi
 
 test('shockwaves get dedicated instances up to the per-quality cap and are pooled', () => {
   const { fm, stage } = setup('high');
-  const hs = [fm.shockwave(), fm.shockwave(), fm.shockwave()];
+  const hs = [fm.shockwave(), fm.shockwave()];
   assert.ok(hs.every(Boolean));
-  assert.equal(new Set(hs.map((h) => h.filter)).size, 3);
-  assert.equal(fm.shockwave(), null, 'cap reached');
+  assert.equal(new Set(hs.map((h) => h.filter)).size, 2);
+  assert.equal(fm.shockwave(), null, 'cap reached (2 distortion passes at most)');
   const first = hs[0].filter;
   hs[0].release();
-  assert.equal(kinds(stage).length, 2);
+  assert.equal(kinds(stage).length, 1);
   const again = fm.shockwave();
   assert.equal(again.filter, first, 'released instance is reused');
-  for (const h of [again, hs[1], hs[2]]) h.release();
+  for (const h of [again, hs[1]]) h.release();
   assert.ok(none(stage));
+});
+
+test('soft filters (bloom, zoom blur, god-rays) render at half resolution, crisp ones at the renderer resolution', () => {
+  const { fm } = setup('high');
+  const b = fm.request('bloom');
+  const z = fm.request('zoom');
+  const g = fm.godray();
+  const r = fm.request('rgb');
+  const i = fm.request('impact');
+  assert.equal(b.filter.resolution, 0.5);
+  assert.equal(z.filter.resolution, 0.5);
+  assert.equal(g.filter.resolution, 0.5);
+  assert.equal(r.filter.resolution, 2);
+  assert.equal(i.filter.resolution, 2);
+  fm.setQuality('medium');
+  assert.equal(r.filter.resolution, 1);
+  assert.equal(b.filter.resolution, 0.5);
+  for (const h of [b, z, g, r, i]) h.release();
 });
 
 test('quality gates expensive filters', () => {
@@ -99,7 +117,6 @@ test('quality gates expensive filters', () => {
   assert.equal(fm.request('zoom'), null);
   assert.equal(fm.request('bloom'), null);
   assert.ok(fm.request('rgb'));
-  assert.ok(fm.shockwave());
   assert.ok(fm.shockwave());
   assert.equal(fm.shockwave(), null);
   const low = setup('low').fm;

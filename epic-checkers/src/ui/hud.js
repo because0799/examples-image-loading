@@ -18,6 +18,14 @@ import { icon } from './icons.js';
 import { flagEl } from './flags.js';
 import { pieceChip } from './components.js';
 import { LEVEL_GLYPHS } from './titles.js';
+import { createToastStack, readMs } from './toasts.js';
+import { sideColors as computeSideColors } from '../controller-colors.js';
+
+/** 0xRRGGBB | '#rrggbb' -> [r, g, b] */
+function rgbOf(c) {
+  const n = typeof c === 'number' ? c : parseInt(String(c).replace('#', ''), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
 
 const BOARD_PAD = 4;
 const LANE_GAP = 4; // px kept free next to the panels / board slot
@@ -97,6 +105,7 @@ export function createGameScreen(ui) {
     statusCustom: false,
     skippable: false,
     cinematic: 0,
+    sideColors: null, // explicit override (hud.setSideColors); else computed from settings.playerColor
   };
 
   const top = buildPanel('top');
@@ -106,6 +115,8 @@ export function createGameScreen(ui) {
   const slot = h('div', { id: 'board-slot' });
   const toasts = h('div.toasts', { 'aria-live': 'polite' });
   const boardArea = h('div.board-area', slot, toasts);
+  const textTime = () => (ui.settings && ui.settings.textTime) || 1.5;
+  const toastStack = createToastStack(toasts, { max: 3, textTime, epic: () => st.epic });
 
   // «Пропустить» lives in the status row (never over the board squares or the lanes): while it is
   // shown the status pill fades out and the chip takes its place.
@@ -219,7 +230,8 @@ export function createGameScreen(ui) {
   function paintHype(color) {
     const r = panelFor(color);
     const v = Math.max(0, Math.min(1, st.hype[color] || 0));
-    r.rageFill.style.width = (v * 100).toFixed(1) + '%';
+    // transform (compositor) instead of width (layout + paint on every frame of the transition)
+    r.rageFill.style.transform = `scaleX(${v.toFixed(3)})`;
     r.el.classList.toggle('rage-full', v >= 0.999);
     r.el.style.setProperty('--rage', v.toFixed(3));
   }
@@ -292,7 +304,46 @@ export function createGameScreen(ui) {
     el.dataset.mode = st.mode;
   }
 
+  /**
+   * EPIC energy colours of the panels / status pill / count chips: the same rule as the board
+   * (controller-colors.js sideColors: the player's side gets settings.playerColor, a clashing
+   * opponent switches cyan <-> crimson), or an explicit hud.setSideColors() map. Classic: none.
+   */
+  let colorsKey = '';
+  function paintSideColors() {
+    let colors = null;
+    if (st.epic) {
+      if (st.sideColors) colors = st.sideColors;
+      else {
+        try {
+          colors = computeSideColors({ playerColor: (ui.settings && ui.settings.playerColor) || 'auto', mode: st.mode, humanColor: st.bottomColor });
+        } catch (e) {
+          colors = null;
+        }
+      }
+    }
+    const key = colors ? `${colors[1]}|${colors[-1] ?? colors['-1']}` : '';
+    if (key === colorsKey) return;
+    colorsKey = key;
+    for (const [c, v] of [
+      [1, 'w'],
+      [-1, 'b'],
+    ]) {
+      const hex = colors ? colors[c] ?? colors[String(c)] : null;
+      if (hex == null) {
+        el.style.removeProperty(`--c${v}`);
+        el.style.removeProperty(`--g${v}`);
+        continue;
+      }
+      const [r, g, b] = rgbOf(hex);
+      el.style.setProperty(`--c${v}`, `rgb(${r}, ${g}, ${b})`);
+      el.style.setProperty(`--g${v}`, `rgba(${r}, ${g}, ${b}, 0.6)`);
+    }
+    el.classList.toggle('has-colors', !!colors);
+  }
+
   function renderAll() {
+    paintSideColors();
     renderPanel(st.bottomColor);
     renderPanel(-st.bottomColor);
     paintStatus();
@@ -412,7 +463,19 @@ export function createGameScreen(ui) {
   }
 
   // ------------------------------------------------------------ temporary status (opts.duration)
+  // A custom status stays readable: an explicit duration is raised to readMs(text), and a request
+  // to clear it (setStatus('')) that comes too early is held until the text has been readable for
+  // readMs(text). A new text or a turn change replaces it at once (the old text is stale then).
   let statusTimer = 0;
+  let statusShownAt = 0;
+  const statusMinMs = (text) => readMs(text, textTime());
+  function clearCustomStatus() {
+    clearTimeout(statusTimer);
+    st.statusCustom = false;
+    st.status = '';
+    st.statusTone = '';
+    paintStatus();
+  }
 
   // ------------------------------------------------------------ public HUD API
   const hud = {
@@ -437,9 +500,10 @@ export function createGameScreen(ui) {
       st.statusTone = '';
       st.statusCustom = false;
       st.skippable = false;
+      st.sideColors = null;
       clearTimeout(statusTimer);
       resetCinematic();
-      toasts.textContent = '';
+      toastStack.clear();
       ui.setTheme(st.epic);
       renderAll();
       layout();
@@ -494,22 +558,37 @@ export function createGameScreen(ui) {
      */
     setStatus(text, opts = {}) {
       clearTimeout(statusTimer);
-      st.statusCustom = !!text;
-      st.status = text || '';
-      st.statusTone = opts.tone || '';
-      paintStatus();
-      if (st.statusTone === 'alert' || isAlertText(text)) pulse(statusEl, 'status-flash');
-      const ms = Number(opts.duration);
-      if (text && ms > 0) {
-        statusTimer = setTimeout(() => {
-          if (st.statusCustom && st.status === text) {
-            st.statusCustom = false;
-            st.status = '';
-            st.statusTone = '';
-            paintStatus();
-          }
-        }, ms);
+      if (!text) {
+        // clearing too early would cut an explanation off mid-sentence
+        const left = st.statusCustom ? statusShownAt + statusMinMs(st.status) - Date.now() : 0;
+        if (left > 50) {
+          const shown = st.status;
+          statusTimer = setTimeout(() => {
+            if (st.statusCustom && st.status === shown) clearCustomStatus();
+          }, left);
+          return;
+        }
+        clearCustomStatus();
+        return;
       }
+      const same = st.statusCustom && st.status === text;
+      st.statusCustom = true;
+      st.status = String(text);
+      st.statusTone = opts.tone || '';
+      if (!same) statusShownAt = Date.now();
+      paintStatus();
+      if (!same && (st.statusTone === 'alert' || isAlertText(text))) pulse(statusEl, 'status-flash');
+      const ms = Number(opts.duration);
+      if (ms > 0) {
+        const life = Math.max(ms, statusMinMs(text));
+        statusTimer = setTimeout(() => {
+          if (st.statusCustom && st.status === text) clearCustomStatus();
+        }, life);
+      }
+    },
+    /** Minimum readable time (ms) of a text at the current settings.textTime. */
+    readMs(text) {
+      return statusMinMs(text);
     },
     /** Shows the «Пропустить» chip while a skippable cinematic plays (tap emits 'skip'). */
     setSkippable(v) {
@@ -536,31 +615,30 @@ export function createGameScreen(ui) {
     lanes() {
       return lanes();
     },
-    /** Re-renders all labels (language / title change). */
+    /** Re-renders all labels (language / title change) and the energy colours. */
     refresh() {
       renderAll();
+    },
+    /**
+     * Energy colours of the sides ({ 1: hex, -1: hex } as 0xRRGGBB or '#rrggbb'), the same map as
+     * renderer.setSideColors; null = derive them from settings.playerColor again.
+     */
+    setSideColors(colors) {
+      st.sideColors = colors && typeof colors === 'object' ? colors : null;
+      paintSideColors();
+    },
+    /** Cheap, idempotent: re-applies what depends on settings (energy colours). */
+    applySettings() {
+      paintSideColors();
     },
     get state() {
       return st;
     },
   };
 
-  // ------------------------------------------------------------ toasts
-  function showToast(text, { epic = st.epic, duration, tone } = {}) {
-    if (!text) return;
-    const node = h(
-      'div.toast',
-      { class: `${epic ? 'toast--epic' : ''} ${tone ? 'toast--' + tone : ''}` },
-      epic ? h('span.toast__slash', { 'aria-hidden': 'true' }) : null,
-      h('span.toast__text', text),
-    );
-    toasts.appendChild(node);
-    while (toasts.children.length > 3) toasts.removeChild(toasts.firstChild);
-    const ms = duration || (epic ? 2200 : 2000);
-    setTimeout(() => {
-      node.classList.add('is-out');
-      setTimeout(() => node.remove(), 450);
-    }, ms);
+  // ------------------------------------------------------------ toasts (readable, stacked: toasts.js)
+  function showToast(text, opts = {}) {
+    toastStack.show(text, opts);
   }
 
   return {

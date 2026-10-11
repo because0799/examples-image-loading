@@ -16,8 +16,12 @@
 //   background + world:                        'grade'   (desaturate / darken, defeat mood)
 //   background:                                'godray'  (light rays in the sky, pillars)
 //
-// Quality: high = everything; medium = cheap filters only (shockwave ≤2, rgb, impact, grade);
+// Quality: high = everything; medium = cheap filters only (shockwave ≤1, rgb, impact, grade);
 // low = none (FX falls back to sprite-only versions).
+// Performance: soft filters (bloom, god-rays, zoom blur) render at HALF resolution (they are
+// blurry by nature; a quarter of the fill cost), crisp ones (rgb split, impact frame, grade,
+// shockwave) at the renderer resolution on high and 1 otherwise. Every filter is attached only
+// while an effect holds it, and at most 2 shockwave distortion passes run at once.
 
 import { ColorMatrixFilter } from 'pixi.js';
 import { ShockwaveFilter } from 'pixi-filters/shockwave';
@@ -27,12 +31,16 @@ import { AdvancedBloomFilter } from 'pixi-filters/advanced-bloom';
 import { GodrayFilter } from 'pixi-filters/godray';
 
 export const FILTER_CAPS = {
-  high: { shockwave: 3, rgb: true, zoom: true, bloom: true, impact: true, grade: true, godray: true },
-  medium: { shockwave: 2, rgb: true, zoom: false, bloom: false, impact: true, grade: true, godray: false },
+  high: { shockwave: 2, rgb: true, zoom: true, bloom: true, impact: true, grade: true, godray: true },
+  medium: { shockwave: 1, rgb: true, zoom: false, bloom: false, impact: true, grade: true, godray: false },
   low: { shockwave: 0, rgb: false, zoom: false, bloom: false, impact: false, grade: false, godray: false },
 };
 
 const ORDER = { shockwave: 10, zoom: 20, rgb: 30, bloom: 40, grade: 50, impact: 60, godray: 5 };
+/** Resolution of the soft (blurry) filters: half the pixels in each direction. */
+export const SOFT_RES = 0.5;
+const SOFT = new Set(['bloom', 'zoom', 'godray']);
+const SHARED = ['rgb', 'zoom', 'bloom', 'impact', 'grade'];
 
 const LUM_R = 0.299;
 const LUM_G = 0.587;
@@ -64,7 +72,7 @@ class Handle {
 export const FILTER_FACTORIES = {
   rgb: () => new RGBSplitFilter({ red: { x: 0, y: 0 }, green: { x: 0, y: 0 }, blue: { x: 0, y: 0 } }),
   zoom: () => new ZoomBlurFilter({ strength: 0, center: { x: 0, y: 0 }, innerRadius: 0, radius: -1, maxKernelSize: 24 }),
-  bloom: () => new AdvancedBloomFilter({ threshold: 0.42, bloomScale: 0, brightness: 1, blur: 6, quality: 3 }),
+  bloom: () => new AdvancedBloomFilter({ threshold: 0.42, bloomScale: 0, brightness: 1, blur: 4, quality: 2 }),
   impact: () => new ColorMatrixFilter(),
   grade: () => new ColorMatrixFilter(),
   shockwave: () =>
@@ -105,24 +113,26 @@ export class FilterManager {
     return this.quality === 'high' ? r : 1;
   }
 
+  /** Resolution for a filter kind (soft filters at SOFT_RES). */
+  _resFor(kind) {
+    return SOFT.has(kind) ? SOFT_RES : this._res;
+  }
+
   _applyResolution() {
-    const res = this._res;
-    for (const f of this._owned) {
-      if (f === this._inst.bloom) f.resolution = Math.min(1, res);
-      else f.resolution = res;
-    }
+    for (const f of this._owned) f.resolution = this._resFor(f._fxKind);
   }
 
   _make(kind) {
     let f = this._inst[kind];
     if (f) return f;
-    if (!['rgb', 'zoom', 'bloom', 'impact', 'grade'].includes(kind)) return null;
+    if (!SHARED.includes(kind)) return null;
     f = this.factories[kind]();
     f.label = `fx-${kind}`;
     f._fxOrder = ORDER[kind];
+    f._fxKind = kind;
     this._inst[kind] = f;
     this._owned.add(f);
-    f.resolution = kind === 'bloom' ? Math.min(1, this._res) : this._res;
+    f.resolution = this._resFor(kind);
     return f;
   }
 
@@ -202,10 +212,11 @@ export class FilterManager {
     if (!f) {
       f = this.factories.shockwave();
       f._fxOrder = ORDER.shockwave;
+      f._fxKind = 'shockwave';
       f.label = 'fx-shockwave';
       this._owned.add(f);
     }
-    f.resolution = this._res;
+    f.resolution = this._resFor('shockwave');
     f.time = 0;
     f.enabled = true;
     const h = new Handle(this, 'shockwave');
@@ -223,11 +234,12 @@ export class FilterManager {
     if (!f) {
       f = this.factories.godray();
       f._fxOrder = ORDER.godray;
+      f._fxKind = 'godray';
       f.label = 'fx-godray';
       this._inst.godray = f;
       this._owned.add(f);
     }
-    f.resolution = Math.min(1, this._res);
+    f.resolution = this._resFor('godray');
     const h = new Handle(this, 'godray');
     h.filter = f;
     this._handles.godray.push(h);
@@ -250,7 +262,7 @@ export class FilterManager {
 
   // ------------------------------------------------------------------ per frame
   update() {
-    for (const kind of ['rgb', 'zoom', 'bloom', 'impact', 'grade']) if (this._handles[kind].length) this._combine(kind);
+    for (let i = 0; i < SHARED.length; i++) if (this._handles[SHARED[i]].length) this._combine(SHARED[i]);
   }
 
   _strongest(kind) {

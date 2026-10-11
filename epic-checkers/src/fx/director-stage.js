@@ -1,33 +1,43 @@
-// Stage — where the Director's screen overlays go, so they never pile up (EAD-01/02/03/15).
+// Stage — where the Director's screen texts go, so they never pile up and every one of them stays
+// on screen long enough to be READ (EAD-01/02/03/15, the client's «не успеваешь прочитать текст»).
 //
 //   const stage = new Stage(director);
 //   stage.setLanes({ top: { y, h } | null, bottom: { y, h } | null });  // free screen space (CSS px)
 //                                         // between the HUD panels and the board frame
-//   stage.request(side, kind, { h, maxWait, make(place) -> overlayPromise })
+//   stage.request(side, kind, { h, maxWait, make(place) -> overlayPromise, duration, read })
 //       -> Promise<{ overlay } | null>    // resolves when shown (null = dropped: waited too long /
 //                                         // superseded); the overlay promise itself is wrapped so
 //                                         // the request does not wait for the overlay to END
-//   stage.claim(side, kind, handle, alive) // register an overlay that cannot wait (combo counter)
+//   stage.claim(side, kind, handle, alive, read)  // register an overlay shown right now
+//   stage.isFree(side, kind)              // nothing there that may not be cut yet
+//   stage.whenFree(side, kind, { maxWait }) -> Promise  // a cinematic waits for its text slot:
+//                                         // older texts are cut as soon as they were readable
+//                                         // long enough (or after maxWait at the latest)
 //   stage.tick()                          // once per frame (Director clock listener)
 //   stage.place(side, kind)               // { y, maxH, lane } for an overlay shown right now
 //   stage.busyUntil(side) / stage.clear()
 //
-// Overlay kinds: 'banner' (turn banner, «ЯРОСТЬ 100%»), 'caption' (speech bubble), 'combo'.
-// Each side ('top' = the player drawn at the top, 'bottom') has ONE lane:
+// Sides: 'top' / 'bottom' (the lanes of the players drawn there) and 'center' (full-width bands and
+// banners over the board: cut-ins, «ПРОБУЖДЕНИЕ», «ДА НАЧНЁТСЯ БИТВА!», game-over banners).
+// Overlay kinds: 'banner' (turn banner), 'hype' («ЯРОСТЬ 100%»), 'caption' (speech bubble),
+// 'combo' (counter), 'big' (centre band / banner).
+// Each lane side has ONE lane:
 //   - a real lane (≥ MIN_LANE px of free space, set by the controller): overlays are centred in it;
 //     when it is tall enough for both, banners take the row next to the board and captions the
 //     row next to the HUD panel (they may then be on screen together);
 //   - otherwise the old placement at the board edge (one row: everything queues).
-// Rules: never two overlays in the same row; a new banner replaces an older banner and asks a
-// caption that has been readable for a while (≥ 700 ms) to exit early; captions never preempt;
-// the combo counter takes the whole lane at once (it belongs to the running move); requests that
-// cannot be shown within maxWait are dropped. Overlays must be real-time FX effects (caption /
-// turnBanner from director-ui.js) — shorten() makes them exit gracefully.
+// READABILITY RULE: every overlay carries its readable time (`read`, prefs.readMs). A newer text
+// may cut an older one only once the older one has been on screen for MIN_VISIBLE_SHARE (60 %) of
+// its readable time — until then the newer one queues. Only the player's tap (Director.skip)
+// cuts texts earlier. Banners / hype / centre requests cut eligible occupants; captions never cut
+// anything (they wait); requests that cannot be shown within maxWait are dropped.
 
 import { shorten } from './director-ui.js';
+import { MIN_VISIBLE_SHARE } from './prefs.js';
 
 export const MIN_LANE = 44;
-const PREEMPT_AFTER = 700;
+/** kinds that may cut an older overlay (once it has been readable long enough) */
+const CUTTERS = new Set(['banner', 'hype', 'big', 'wait']);
 
 const now = (d) => (d && d._clock ? d._clock.realNow : 0);
 
@@ -37,6 +47,7 @@ export class Stage {
     this.lanes = { top: null, bottom: null };
     this.items = [];
     this.queue = [];
+    this.share = MIN_VISIBLE_SHARE;
   }
 
   /** lanes: { top: { y, h } | null, bottom: { y, h } | null } in screen CSS px. */
@@ -48,9 +59,9 @@ export class Stage {
     this.lanes = { top: norm(l && l.top), bottom: norm(l && l.bottom) };
   }
 
-  /** The usable lane of a side ({ y, h }) or null (too small / unknown). */
+  /** The usable lane of a side ({ y, h }) or null (too small / unknown / the centre). */
   lane(side) {
-    const l = this.lanes[side];
+    const l = side === 'top' || side === 'bottom' ? this.lanes[side] : null;
     return l && l.h >= MIN_LANE ? l : null;
   }
 
@@ -85,12 +96,19 @@ export class Stage {
 
   /** Row of an overlay kind in a lane: 'all' (one row), 'near' (next to the board) or 'far'. */
   _row(side, kind) {
-    if (kind === 'combo' || !this._twoRows(side)) return 'all';
+    if (kind === 'combo' || side === 'center' || !this._twoRows(side)) return 'all';
     return kind === 'caption' ? 'far' : 'near';
   }
 
   _conflict(a, b) {
     return a.side === b.side && (a.row === 'all' || b.row === 'all' || a.row === b.row);
+  }
+
+  /** May `it` be cut now (it has been readable for ≥ 60 % of its readable time)? */
+  canCut(it, t = now(this.d)) {
+    if (!it || it.done) return true;
+    if (!(it.read > 0)) return true;
+    return t - it.born >= this.share * it.read;
   }
 
   /**
@@ -116,7 +134,13 @@ export class Stage {
   }
 
   _prune() {
-    this.items = this.items.filter((it) => !it.done && (!it.alive || it.alive()));
+    let w = 0;
+    const list = this.items;
+    for (let i = 0; i < list.length; i++) {
+      const it = list[i];
+      if (!it.done && (!it.alive || it.alive())) list[w++] = it;
+    }
+    list.length = w;
   }
 
   /** Real time (ms) until which `side` shows something (0 when free). */
@@ -127,9 +151,18 @@ export class Stage {
     return t;
   }
 
+  /** Nothing on `side` (in the row of `kind`) that may not be cut yet? */
+  isFree(side, kind) {
+    this._prune();
+    const probe = { side, row: this._row(side, kind) };
+    const t = now(this.d);
+    return !this.items.some((it) => this._conflict(probe, it) && !this.canCut(it, t));
+  }
+
   /**
    * Show an overlay as soon as its row is free. o: { h, maxWait (ms), make(place) -> promise,
-   * duration (ms, expected) }. Resolves with { overlay } once it is shown, or null when dropped.
+   * duration (ms, expected on-screen time), read (ms, readable time) }. Resolves with { overlay }
+   * once it is shown, or null when dropped.
    */
   request(side, kind, o = {}) {
     return new Promise((resolve) => {
@@ -150,12 +183,26 @@ export class Stage {
     });
   }
 
-  /** Register an overlay that shows immediately (it clears its row first). */
-  claim(side, kind, handle, alive = null) {
+  /**
+   * Resolves when `side` (row of `kind`) is free: occupants are cut as soon as they have been
+   * readable for 60 % of their time; after maxWait they are cut anyway (a cinematic never stalls).
+   */
+  whenFree(side, kind = 'big', { maxWait = 4000 } = {}) {
+    if (this.isFree(side, kind) && !this.items.some((it) => this._conflict({ side, row: this._row(side, kind) }, it))) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const req = { side, kind: 'wait', row: this._row(side, kind), o: { make: null }, at: now(this.d), maxWait, waiter: true, resolve: () => resolve(true) };
+      this.queue.push(req);
+      this._pump();
+    });
+  }
+
+  /** Register an overlay that is on screen right now (it cuts what may be cut in its row). */
+  claim(side, kind, handle, alive = null, read = 0) {
     const row = this._row(side, kind);
-    const it = { side, kind, row, handle, born: now(this.d), alive, until: 0, done: false };
+    const t = now(this.d);
+    const it = { side, kind, row, handle, born: t, alive, read, until: 0, done: false };
     for (const other of this.items) {
-      if (other !== it && this._conflict(it, other)) this._evict(other, 160);
+      if (other !== it && this._conflict(it, other) && this.canCut(other, t)) this._evict(other, 160);
     }
     this.items.push(it);
     if (handle && typeof handle.then === 'function') handle.then(() => (it.done = true), () => (it.done = true));
@@ -169,7 +216,8 @@ export class Stage {
   }
 
   _evict(it, ms) {
-    if (it.done) return;
+    if (it.done || it.shortened) return;
+    it.shortened = true;
     if (it.kind === 'combo') {
       const fx = this._fx();
       if (fx && typeof fx.hideCombo === 'function') fx.hideCombo();
@@ -194,22 +242,25 @@ export class Stage {
     for (const q of this.queue.slice()) {
       const blockers = this.items.filter((it) => this._conflict(q, it));
       if (!blockers.length) {
-        this._show(q);
+        if (q.waiter) {
+          const i = this.queue.indexOf(q);
+          if (i >= 0) this.queue.splice(i, 1);
+          q.resolve();
+        } else this._show(q);
         continue;
       }
-      if (t - q.at > q.maxWait) {
+      const late = t - q.at > q.maxWait;
+      if (late && !q.waiter) {
         this._drop(q);
         continue;
       }
-      if (q.kind === 'banner') {
-        // banners are time-critical: an older banner goes now; a caption that has been readable for
-        // a while exits early; the combo counter (the running move) is waited for
+      if (CUTTERS.has(q.kind)) {
+        // time-critical texts: an occupant goes as soon as it has been readable long enough (a
+        // waiting cinematic cuts it anyway once maxWait has passed); the combo counter (the
+        // running move) is waited for unless the cinematic itself needs the slot
         for (const b of blockers) {
-          if (b.kind === 'banner') this._evict(b, 120);
-          else if (b.kind === 'caption' && t - b.born >= PREEMPT_AFTER && !b.shortened) {
-            b.shortened = true;
-            this._evict(b, 200);
-          }
+          if (b.kind === 'combo' && !q.waiter) continue;
+          if (late || this.canCut(b, t)) this._evict(b, b.kind === 'banner' ? 140 : 220);
         }
       }
     }
@@ -226,7 +277,8 @@ export class Stage {
       console.error('[director] overlay failed', e);
     }
     if (handle) {
-      const it = { side: q.side, kind: q.kind, row: q.row, handle, born: now(this.d), until: now(this.d) + (q.o.duration || 1000), done: false };
+      const t = now(this.d);
+      const it = { side: q.side, kind: q.kind, row: q.row, handle, born: t, read: q.o.read || 0, until: t + (q.o.duration || 1000), done: false };
       this.items.push(it);
       if (typeof handle.then === 'function') handle.then(() => (it.done = true), () => (it.done = true));
     }
@@ -235,7 +287,13 @@ export class Stage {
 
   /** Drop everything queued (the overlays already on screen are left to the FX runner). */
   clear() {
-    for (const q of this.queue.slice()) this._drop(q);
+    for (const q of this.queue.slice()) {
+      if (q.waiter) {
+        const i = this.queue.indexOf(q);
+        if (i >= 0) this.queue.splice(i, 1);
+        q.resolve();
+      } else this._drop(q);
+    }
     this.items = [];
   }
 }

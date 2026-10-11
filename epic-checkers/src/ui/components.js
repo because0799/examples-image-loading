@@ -111,17 +111,22 @@ export function segmented({ options, value, onChange, cls = '', label }) {
   return el;
 }
 
-/** Range slider 0..1 with a filled track. onInput fires continuously, onChange on release. */
-export function slider({ value, onInput, onChange, label, min = 0, max = 1, step = 0.05 }) {
+/**
+ * Range slider with a filled track. onInput fires continuously, onChange on release.
+ * format(v) -> label text (default: percent of the range). Returns the wrapper with
+ * el.setValue(v) (silent; ignored while the value is unchanged, so a drag is never disturbed).
+ */
+export function slider({ value, onInput, onChange, label, min = 0, max = 1, step = 0.05, format = null, cls = '' }) {
   const input = h('input.slider__input', { type: 'range', min, max, step, 'aria-label': label || '' });
   input.value = String(value);
   const out = h('span.slider__value');
-  const wrap = h('div.slider', input, out);
+  const wrap = h('div.slider', { class: cls }, input, out);
   const paint = () => {
     const v = Number(input.value);
     const p = ((v - min) / (max - min)) * 100;
     wrap.style.setProperty('--p', p + '%');
-    out.textContent = Math.round(p) + '%';
+    out.textContent = format ? format(v) : Math.round(p) + '%';
+    input.setAttribute('aria-valuetext', out.textContent);
   };
   paint();
   input.addEventListener('input', () => {
@@ -132,6 +137,12 @@ export function slider({ value, onInput, onChange, label, min = 0, max = 1, step
     feedback.haptic(6);
     onChange && onChange(Number(input.value));
   });
+  wrap.setValue = (v) => {
+    if (Number(input.value) === Number(v)) return;
+    input.value = String(v);
+    paint();
+  };
+  wrap.input = input;
   return wrap;
 }
 
@@ -151,14 +162,15 @@ export function section(title, ...children) {
 }
 
 /** Settings-style row: icon, label + description, control on the right (or below on narrow). */
-export function row({ icon: ic, label, desc, control, stack = false }) {
+export function row({ icon: ic, label, desc, control, stack = false, cls = '', aside = null }) {
   return h(
     'div.row',
-    { class: stack ? 'row--stack' : '' },
+    { class: `${stack ? 'row--stack' : ''} ${cls}` },
     h(
       'div.row__head',
       ic ? icon(ic, 'row__icon') : null,
       h('div.row__text', h('div.row__label', label), desc ? h('div.row__desc', desc) : null),
+      aside,
       !stack ? control : null,
     ),
     stack ? h('div.row__control', control) : null,

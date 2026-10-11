@@ -11,6 +11,7 @@
 //   native.vibrate([40, 30, 80]);                 // web convention: vibrate, pause, vibrate…
 //   native.haptic('capture', { intensity: 1.5 }); // named presets (HAPTICS)
 //   native.speak('COMBO!', { lang: 'en-US', pitch: 0.8, rate: 1.1 });
+//   native.setHaptics('light');                   // 'off' | 'light' | 'strong' (settings.haptics)
 //   native.setBackHandler(() => ui.handleBack()); // return true = handled, false = exit app
 //   const off = native.onPause(() => audio.setMuted(true));
 //
@@ -45,6 +46,31 @@ export const HAPTICS = Object.freeze({
   draw: [60, 90, 60],
   turn: [14],
 });
+
+/** settings.haptics values: every vibrate() call (UI, Director …) is gated by the current one. */
+export const HAPTIC_MODES = Object.freeze(['off', 'light', 'strong']);
+/**
+ * 'light': every pulse capped to 4–28 ms, at most 3 pulses, and a weak amplitude where the phone
+ * supports it. Idempotent on purpose: callers that already softened a pattern for the 'light'
+ * level (storage.hapticPattern) are not softened twice.
+ */
+export const LIGHT_HAPTICS = Object.freeze({ min: 4, max: 28, pulses: 3, amplitude: 70 });
+
+/** A normalised web pattern made short and gentle for the 'light' haptics setting. */
+export function lightPattern(p) {
+  const L = LIGHT_HAPTICS;
+  const out = [];
+  let pulses = 0;
+  for (let i = 0; i < p.length; i++) {
+    if (i % 2 === 0) {
+      if (pulses >= L.pulses) break;
+      out.push(p[i] > 0 ? Math.min(L.max, Math.max(L.min, p[i])) : 0);
+      if (p[i] > 0) pulses++;
+    } else out.push(p[i]);
+  }
+  if (out.length % 2 === 0) out.pop(); // never end on a pause
+  return out;
+}
 
 /** Normalises ms | ms[] into a clamped array of whole milliseconds (web convention). */
 export function normalizePattern(pattern) {
@@ -288,6 +314,8 @@ export function createNative(win = typeof window !== 'undefined' ? window : null
     }
   };
 
+  let hapticsMode = 'strong';
+
   // ------------------------------------------------------------------ the facade
   const api = {
     /** true inside the Android APK (window.AndroidBridge exists). */
@@ -302,13 +330,32 @@ export function createNative(win = typeof window !== 'undefined' ? window : null
       return paused;
     },
 
+    /** Current haptics setting ('off' | 'light' | 'strong'). */
+    get haptics() {
+      return hapticsMode;
+    },
+
+    /** settings.haptics: 'off' silences every vibrate() (a cancel still passes), 'light' softens. */
+    setHaptics(mode) {
+      const m = mode === true ? 'strong' : mode === false ? 'off' : mode;
+      hapticsMode = HAPTIC_MODES.includes(m) ? m : 'strong';
+      if (hapticsMode === 'off') api.vibrate(0); // stop a long rumble that is still playing
+      return hapticsMode;
+    },
+
     /** @param pattern ms | ms[] (vibrate, pause, vibrate, …). 0 / [] cancels. */
     vibrate(pattern) {
-      const p = normalizePattern(pattern);
+      let p = normalizePattern(pattern);
+      const on = hasVibration(p);
+      if (on && hapticsMode === 'off') return false;
+      const light = on && hapticsMode === 'light';
+      if (light) p = lightPattern(p);
       const b = bridge();
       try {
         if (b && typeof b.vibrate === 'function') {
-          b.vibrate(p.length === 1 ? String(p[0]) : JSON.stringify(p));
+          const spec = p.length === 1 ? String(p[0]) : JSON.stringify(p);
+          if (light && typeof b.vibrateLevel === 'function') b.vibrateLevel(spec, LIGHT_HAPTICS.amplitude);
+          else b.vibrate(spec);
           return true;
         }
         const n = nav();

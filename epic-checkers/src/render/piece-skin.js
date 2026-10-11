@@ -1,6 +1,9 @@
 // Piece skins: all textures a PieceView needs for one theme at one square size.
-// Generated procedurally on 2D canvases at (CSS size × resolution × oversample) so pieces stay crisp
-// on 2×/3× phones and when the camera zooms in.
+// Generated procedurally on 2D canvases at (CSS size × renderer resolution × oversample) so pieces
+// stay crisp at the canvas resolution and when the camera zooms in. The oversample follows the
+// Director's zoom for that square size (clamp(58 / sq, 1.1, 1.5)); 'low' quality uses 1.
+// EPIC skins bake the energy colour of each side (default cyan / crimson, or the player's chosen
+// colour: opts.colors = { 1: hex, -1: hex }); the Renderer caches skins per colour pair.
 //
 // Geometry (logical CSS px): R = piece radius = 0.42 × squareSize. Body textures are square and
 // centred on the TOP FACE of the disc; the visible wall (thickness) extends below it. PieceView
@@ -568,12 +571,36 @@ function paintKingRing(ctx, R) {
  * Build a skin. `res` = renderer resolution; textures are generated at res × oversample.
  * @returns {PieceSkin}
  */
-export function createPieceSkin(theme, squareSize, res = 1) {
-  return theme === 'epic' ? new PieceSkin('epic', squareSize, res) : new PieceSkin('classic', squareSize, res);
+export function createPieceSkin(theme, squareSize, res = 1, opts = {}) {
+  return new PieceSkin(theme === 'epic' ? 'epic' : 'classic', squareSize, res, opts);
+}
+
+/** Texture oversampling for camera zoom-ins at this square size (matches the Director's zoom). */
+export function skinOversample(squareSize, quality = 'high') {
+  if (quality === 'low') return 1;
+  return Math.max(1.1, Math.min(1.5, 58 / Math.max(1, squareSize || 40)));
+}
+
+/** Epic energy colours { 1, -1 } from optional overrides (invalid entries → defaults). */
+export function skinColors(colors) {
+  const pick = (side) => {
+    const c = colors ? colors[side] : null;
+    return Number.isInteger(c) && c >= 0 && c <= 0xffffff ? c : EPIC.side[side];
+  };
+  return { 1: pick(1), [-1]: pick(-1) };
+}
+
+/** Cache key of a skin: theme, size, resolution, oversample and (epic) the two energy colours. */
+export function skinKey(theme, sq, res, opts = {}) {
+  const os = opts.oversample != null ? +opts.oversample : 1.6;
+  const base = `${theme}|${(+sq).toFixed(3)}|${(+res).toFixed(3)}|${os.toFixed(3)}`;
+  if (theme !== 'epic') return base;
+  const c = skinColors(opts.colors);
+  return `${base}|${c[1]}|${c[-1]}`;
 }
 
 export class PieceSkin {
-  constructor(theme, sq, res) {
+  constructor(theme, sq, res, opts = {}) {
     this.theme = theme;
     this.squareSize = sq;
     this.R = sq * PIECE_RADIUS;
@@ -581,9 +608,14 @@ export class PieceSkin {
     const epic = theme === 'epic';
     // oversample so camera zoom-ins stay crisp; cap texture size
     const bodyLogical = 2 * (R * 1.0 + R * 0.4 + 2);
-    this.res = Math.max(1, Math.min(res * 1.6, 300 / bodyLogical));
+    const oversample = opts.oversample != null ? Math.max(1, +opts.oversample || 1) : 1.6;
+    this.oversample = oversample;
+    this.res = Math.max(1, Math.min(res * oversample, 300 / bodyLogical));
+    this.key = skinKey(theme, sq, res, { ...opts, oversample });
     this.thickness = epic ? { man: R * 0.13, king: R * 0.26 } : { man: R * 0.17, king: R * 0.36 };
     this.palette = epic ? EPIC : CLASSIC;
+    /** energy colour per side (epic: possibly the player's chosen colour) */
+    this.colors = epic ? skinColors(opts.colors) : { 1: CLASSIC.side[1], [-1]: CLASSIC.side[-1] };
     const tex = (this.textures = {});
     const resT = this.res;
     const S = bodyLogical;
@@ -626,7 +658,7 @@ export class PieceSkin {
           ctx.translate(w / 2, w / 2);
           if (epic) {
             const B = EPIC_BODY[side];
-            const col = EPIC.side[side];
+            const col = this.colors[side];
             paintEpicWall(ctx, R, t, B, king, col);
             paintEpicFace(ctx, R, B, side, king, col);
           } else {
@@ -651,7 +683,7 @@ export class PieceSkin {
           const cs = R * 1.4;
           tex.core[side][king ? 'king' : 'man'] = drawTexture(cs, cs, resT, (ctx, w) => {
             ctx.translate(w / 2, w / 2);
-            paintEpicCore(ctx, R, EPIC.side[side], king);
+            paintEpicCore(ctx, R, this.colors[side], king);
           }, { label: `piece-core-${side}-${king ? 'k' : 'm'}` });
         }
       }
@@ -698,7 +730,7 @@ export class PieceSkin {
   }
 
   sideColor(side) {
-    return this.palette.side[side];
+    return this.colors[side] != null ? this.colors[side] : this.palette.side[side];
   }
 
   destroy() {
@@ -709,5 +741,6 @@ export class PieceSkin {
     };
     walk(this.textures);
     this.textures = null;
+    this.destroyed = true;
   }
 }

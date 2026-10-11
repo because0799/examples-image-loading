@@ -234,7 +234,10 @@ export function buildGameOver(ui, opts, choose) {
 
   const particles = h('div.go__particles', { 'aria-hidden': 'true' });
   const r = rng(seed + 3);
-  const nParticles = ui.settings.quality === 'low' ? 0 : ui.settings.quality === 'medium' ? 22 : 44;
+  // DOM confetti: every piece is a composited layer over the animating canvas
+  const q = ui.effectiveQuality || ui.settings.quality;
+  const amount = ui.settings.fx && Number.isFinite(ui.settings.fx.particles) ? ui.settings.fx.particles : 1;
+  const nParticles = ui.settings.battery || q === 'low' ? 0 : Math.round((q === 'medium' ? 14 : 30) * Math.min(1.5, Math.max(0, amount)));
   for (let i = 0; i < (outcome === 'draw' ? Math.round(nParticles / 2) : nParticles); i++) {
     particles.appendChild(
       h('i', {

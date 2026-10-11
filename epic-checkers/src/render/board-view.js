@@ -2,8 +2,14 @@
 // (frame + squares + labels) and, in the epic theme, the living decorations: breathing energy
 // seams, energy sparks racing along the seams, a slowly rotating magic circle under the glass,
 // animated frame runes, corner sigils and an occasional light sheen sweeping across the obsidian.
+//
+// Performance (mobile GPUs are fill-rate bound): the drop shadow and the turn glow are EdgeFrames
+// (9-slice without the centre that the opaque board hides anyway), the magic circle is ONE
+// additive sprite, and every per-frame animation is a plain sprite transform / alpha / tint
+// change (no Graphics rebuilds, no texture uploads, no filters) so the whole board batches.
 
-import { Container, Sprite, TilingSprite } from 'pixi.js';
+import { Container, Rectangle, Sprite, Texture, TilingSprite } from 'pixi.js';
+import { EdgeFrame } from './edge-frame.js';
 import { drawTexture, destroyTexture, glowTexture, mixHex } from './canvas.js';
 import {
   drawClassicBoard,
@@ -22,9 +28,55 @@ import { mulberry32 } from './noise.js';
 
 const QUALITY = {
   high: { sparks: 12, sheen: true, magic: true, comets: 2 },
-  medium: { sparks: 7, sheen: true, magic: true, comets: 1 },
+  // medium / low: no magic circle (a full-board additive layer for a 14 % alpha detail)
+  medium: { sparks: 7, sheen: true, magic: false, comets: 1 },
   low: { sparks: 3, sheen: false, magic: false, comets: 0 },
 };
+
+/**
+ * Disjoint rectangles [x, y, w, h] (frame-local, logical px) that cover every glowing texel of the
+ * epic seam texture (drawEpicSeamGlow): the 4 border bands, one strip per vertical line between
+ * them (owning the crossings) and the horizontal segments between the vertical strips. null when
+ * the board is too small for strips (draw the whole texture instead).
+ */
+export function seamStripRects(L) {
+  const { n, sq, fw } = L;
+  const bw = n * sq;
+  const off = Math.max(1, fw * 0.07) * 1.5; // border line offset (drawEpicSeamGlow)
+  const hb = Math.max(6, fw * 0.5) / 2 + 1.5; // half band of the widest border pass + margin
+  const hl = Math.max(4, sq * 0.22) / 2 + 1.5; // half band of the widest line pass + margin
+  const x0 = fw - off;
+  const x1 = fw + bw + off;
+  const i0 = x0 + hb;
+  const i1 = x1 - hb;
+  const T = L.total != null ? L.total : bw + 2 * fw;
+  const fits = n >= 2 && fw + sq - hl > i0 + 0.5 && sq > 2 * hl + 1 && x0 - hb >= 0 && x1 + hb <= T;
+  if (!fits) return null;
+  const out = [];
+  const add = (x, y, w, h) => {
+    if (w > 0.01 && h > 0.01) out.push([x, y, w, h]);
+  };
+  add(x0 - hb, x0 - hb, x1 - x0 + 2 * hb, 2 * hb);
+  add(x0 - hb, x1 - hb, x1 - x0 + 2 * hb, 2 * hb);
+  add(x0 - hb, i0, 2 * hb, i1 - i0);
+  add(x1 - hb, i0, 2 * hb, i1 - i0);
+  const xs = [];
+  for (let i = 1; i < n; i++) {
+    const x = fw + i * sq;
+    xs.push(x);
+    add(x - hl, i0, 2 * hl, i1 - i0);
+  }
+  for (let j = 1; j < n; j++) {
+    const y = fw + j * sq - hl;
+    let from = i0;
+    for (const x of xs) {
+      add(from, y, x - hl - from, 2 * hl);
+      from = x + hl;
+    }
+    add(from, y, i1 - from, 2 * hl);
+  }
+  return out;
+}
 
 export class BoardView {
   constructor(renderer) {
@@ -40,18 +92,23 @@ export class BoardView {
     this._turnIntensity = 1;
     this._sheenTimer = 3.5;
     this._rnd = mulberry32(99);
+    this._subTextures = [];
 
-    this.shadow = new Sprite();
-    this.turnGlow = new Sprite();
+    this.shadow = new EdgeFrame();
+    this.shadow.label = 'board-shadow';
+    this.turnGlow = new EdgeFrame();
+    this.turnGlow.label = 'turn-glow';
     this.turnGlow.blendMode = 'add';
+    /** side (1 / -1) the turn glow shows, or null when it was given a plain colour */
+    this._turnSide = null;
     this.base = new Sprite();
     this.fx = new Container(); // epic decorations above the base
     this.fx.label = 'board-fx';
     this.root.addChild(this.shadow, this.turnGlow, this.base, this.fx);
 
     this.seams = null;
-    this.magicOuter = null;
-    this.magicInner = null;
+    /** the magic circle (outer ring + inner hexagram baked into ONE additive sprite) */
+    this.magic = null;
     this.sparks = [];
     this.runes = [];
     this.sigils = [];
@@ -83,35 +140,55 @@ export class BoardView {
     const T = L.total;
     const epic = theme === 'epic';
 
-    // board base texture (oversampled for camera zoom, capped)
-    const bres = Math.max(1, Math.min(res * 1.25, 2600 / T, 3));
+    // board base texture (labels / grain): oversampled a little for the camera's zoom-ins, at most
+    // a 2048 px texture; 'low' skips the oversampling
+    const over = this.quality === 'low' ? 1 : 1.15;
+    const bres = Math.max(1, Math.min(res * over, 2048 / T, 3));
     this.base.texture = keep(
       drawTexture(T, T, bres, (ctx) => (epic ? drawEpicBoard(ctx, L) : drawClassicBoard(ctx, L)), { label: 'board' })
     );
 
-    // drop shadow
+    // drop shadow: a small blurred rounded rect sliced into an EdgeFrame (its middle is under the board)
     const m = Math.round(T * 0.09);
     this._shadowM = m;
-    this.shadow.texture = keep(
-      drawTexture(T + 2 * m, T + 2 * m, 0.5, (ctx, w, h, k) => drawBoardShadow(ctx, T, m, { alpha: epic ? 0.9 : 0.8, radius: L.fw * 0.4, k }), {
-        label: 'board-shadow',
-      })
+    const sRad = L.fw * 0.4;
+    const ch = Math.max(4, L.fw * 0.55);
+    // corner slice: past the rounded corner + 3σ of the blur (σ ≈ 0.225·m), so the stretched middle
+    // slice is exactly uniform; and deep enough that the hole stays under the (lower) board
+    const sc = Math.ceil(m + Math.max(sRad + m * 0.75 + 2, T * 0.03 + 2, ch + 2));
+    const sS = 2 * sc + 4;
+    this.shadow.setTexture(
+      keep(
+        drawTexture(sS, sS, 0.75, (ctx, w, h, k) => drawBoardShadow(ctx, sS - 2 * m, m, { alpha: epic ? 0.9 : 0.8, radius: sRad, k }), {
+          label: 'board-shadow',
+        })
+      ),
+      sc,
+      // edges only reach under the board: the shadow sits 0.025·T lower than the board
+      Math.ceil(m + T * 0.025 + 3)
     );
+    this.shadow.setSize(T + 2 * m, T + 2 * m);
     this.shadow.alpha = epic ? 0.95 : 0.85;
 
-    // turn glow (epic)
+    // turn glow (epic): an EdgeFrame too (the inside of the ring is under the board)
     if (epic) {
       const gm = Math.max(14, L.fw * 1.3);
       this._glowM = gm;
-      const ch = Math.max(4, L.fw * 0.55);
-      this.turnGlow.texture = keep(
-        drawTexture(T + 2 * gm, T + 2 * gm, Math.min(res, 1.5), (ctx) => drawEdgeGlow(ctx, T, gm, ch), { label: 'turn-glow' })
+      // corner slice: past the chamfer + the widest glow pass (half of 1.6·gm), so the stretched
+      // middle slice is exactly uniform along the edge
+      const gc = Math.ceil(gm + ch + gm * 0.85 + 3);
+      const gS = 2 * gc + 4;
+      this.turnGlow.setTexture(
+        keep(drawTexture(gS, gS, Math.min(res, 1.5), (ctx) => drawEdgeGlow(ctx, gS - 2 * gm, gm, ch), { label: 'turn-glow' })),
+        gc,
+        Math.ceil(gm + 3)
       );
+      this.turnGlow.setSize(T + 2 * gm, T + 2 * gm);
       this.turnGlow.visible = true;
       if (this._appliedTurn !== this._turnColor) {
-      this._appliedTurn = this._turnColor;
-      this.turnGlow.tint = this._turnColor;
-    }
+        this._appliedTurn = this._turnColor;
+        this.turnGlow.tint = this._turnColor;
+      }
       this._buildEpicDecor(L, res, keep);
     } else {
       this.turnGlow.visible = false;
@@ -125,25 +202,31 @@ export class BoardView {
     const bw = L.n * L.sq;
     const fx = this.fx;
 
-    // magic circle under the glass (two counter-rotating parts)
+    // magic circle under the glass: outer ring + inner hexagram baked into ONE additive sprite
+    // (was two counter-rotating full-board sprites: ~0.35 screen of blended fill each per frame)
     if (Q.magic) {
       const size = bw * 0.94;
-      const mres = Math.min(res, 1.5);
-      const outer = keep(drawTexture(size, size, mres, (ctx) => drawMagicCircle(ctx, size, 'outer'), { label: 'magic-outer' }));
-      const inner = keep(drawTexture(size, size, mres, (ctx) => drawMagicCircle(ctx, size, 'inner'), { label: 'magic-inner' }));
-      this.magicOuter = new Sprite(outer);
-      this.magicInner = new Sprite(inner);
-      for (const s of [this.magicOuter, this.magicInner]) {
-        s.anchor.set(0.5);
-        s.blendMode = 'add';
-        s.tint = EPIC.grid;
-        fx.addChild(s);
-      }
+      const mres = Math.min(res, 1.25);
+      const tex = keep(
+        drawTexture(size, size, mres, (ctx) => {
+          ctx.save();
+          drawMagicCircle(ctx, size, 'outer');
+          ctx.restore();
+          ctx.save();
+          ctx.globalAlpha = 0.8;
+          drawMagicCircle(ctx, size, 'inner');
+          ctx.restore();
+        }, { label: 'magic-circle' })
+      );
+      this.magic = new Sprite(tex);
+      this.magic.anchor.set(0.5);
+      this.magic.blendMode = 'add';
+      this.magic.tint = EPIC.grid;
+      fx.addChild(this.magic);
     }
 
-    // seam glow
-    this.seams = new Sprite(keep(drawTexture(T, T, Math.min(res, 2), (ctx) => drawEpicSeamGlow(ctx, L), { label: 'seam-glow' })));
-    this.seams.blendMode = 'add';
+    // seam glow (soft glow lines: 1.5× is plenty even on 3× phones), drawn as disjoint strips
+    this.seams = this._seamStrips(L, keep(drawTexture(T, T, Math.min(res, 1.5), (ctx) => drawEpicSeamGlow(ctx, L), { label: 'seam-glow' })));
     fx.addChild(this.seams);
 
     // sheen sweep: a TilingSprite clipped to the playing field by its own rect (no stencil mask);
@@ -152,7 +235,7 @@ export class BoardView {
       const TS = 128;
       const tex = keep(
         drawTexture(TS, TS, 1, (ctx, w) => {
-          const img = ctx.getImageData(0, 0, w, w);
+          const img = ctx.createImageData(w, w); // every texel is written: no read-back needed
           const d = img.data;
           for (let y = 0; y < w; y++) {
             for (let x = 0; x < w; x++) {
@@ -250,6 +333,35 @@ export class BoardView {
     }
   }
 
+  /**
+   * The seam glow texture is mostly empty (thin lines on a T×T square). Instead of one full-board
+   * additive quad, cut it into DISJOINT sub-texture strips that cover only the glowing parts: the
+   * 4 border bands, one strip per vertical line (between the border bands) and the horizontal line
+   * segments between the vertical strips. Same image (every texel is drawn exactly once), ~45 %
+   * less blended fill, one batch. Falls back to the full sprite when the board is too small.
+   */
+  _seamStrips(L, tex) {
+    const box = new Container();
+    box.label = 'seam-glow';
+    const rects = seamStripRects(L);
+    if (!rects) {
+      const sp = new Sprite(tex);
+      sp.blendMode = 'add';
+      box.addChild(sp);
+      return box;
+    }
+    for (const [x, y, w, h] of rects) {
+      // sub-textures share the seam texture's source: destroyed WITHOUT the source (_clearDecor)
+      const t = new Texture({ source: tex.source, frame: new Rectangle(x, y, w, h), label: 'seam-part' });
+      this._subTextures.push(t);
+      const sp = new Sprite(t);
+      sp.position.set(x, y);
+      sp.blendMode = 'add';
+      box.addChild(sp);
+    }
+    return box;
+  }
+
   /** Point at distance p along the inner border (local coords) → this._pt (no allocation). */
   _perimPoint(p) {
     const P = this._perim;
@@ -284,9 +396,11 @@ export class BoardView {
   }
 
   _clearDecor() {
-    this.fx.removeChildren().forEach((c) => c.destroy());
+    this.fx.removeChildren().forEach((c) => c.destroy({ children: true }));
+    for (const t of this._subTextures) t.destroy(false);
+    this._subTextures = [];
     this.seams = null;
-    this.magicOuter = this.magicInner = null;
+    this.magic = null;
     this.sparks = [];
     this.runes = [];
     this.sigils = [];
@@ -303,10 +417,7 @@ export class BoardView {
     if (this.seams) this.seams.position.set(L.x, L.y);
     const cx = L.x + L.total / 2;
     const cy = L.y + L.total / 2;
-    if (this.magicOuter) {
-      this.magicOuter.position.set(cx, cy);
-      this.magicInner.position.set(cx, cy);
-    }
+    if (this.magic) this.magic.position.set(cx, cy);
     if (this.sheen) {
       const bw = L.n * L.sq;
       this.sheen.position.set(L.x + L.fw, L.y + L.fw);
@@ -321,10 +432,12 @@ export class BoardView {
 
   /**
    * Edge glow colour (epic). color: side (1 / -1), a hex colour, or null to switch it off.
+   * A side uses the renderer's (possibly custom) energy colour of that side.
    */
   setTurnGlow(color, { intensity = 1, flare = true } = {}) {
     let c = color;
-    if (color === 1 || color === -1) c = EPIC.side[color];
+    this._turnSide = color === 1 || color === -1 ? color : null;
+    if (this._turnSide) c = this._sideColor(color);
     this._turnIntensity = c == null ? 0 : intensity;
     if (c == null) return;
     if (this._turnTween) this._turnTween.cancel();
@@ -339,6 +452,16 @@ export class BoardView {
       },
     });
     if (flare) this._turnFlare = 1;
+  }
+
+  _sideColor(side) {
+    const r = this.r;
+    return r && typeof r.epicSideColor === 'function' ? r.epicSideColor(side) : EPIC.side[side];
+  }
+
+  /** The side colours changed: re-tint the turn glow if it shows a side. */
+  refreshSideColors() {
+    if (this._turnSide) this.setTurnGlow(this._turnSide, { intensity: this._turnIntensity || 1, flare: false });
   }
 
   /** @internal per frame. t = game seconds, rt = real seconds. */
@@ -356,11 +479,9 @@ export class BoardView {
     this.turnGlow.alpha = this._turnIntensity * (0.5 + 0.22 * breathe + 0.5 * this._turnFlare);
 
     if (this.seams) this.seams.alpha = 0.55 + 0.25 * Math.sin(t * 1.3) + 0.12 * Math.sin(t * 3.7);
-    if (this.magicOuter) {
-      this.magicOuter.rotation = t * 0.035;
-      this.magicInner.rotation = -t * 0.06;
-      this.magicOuter.alpha = 0.13 + 0.04 * Math.sin(t * 0.8);
-      this.magicInner.alpha = 0.1 + 0.04 * Math.sin(t * 0.8 + 1.5);
+    if (this.magic) {
+      this.magic.rotation = t * 0.035;
+      this.magic.alpha = 0.14 + 0.045 * Math.sin(t * 0.8);
     }
 
     // sparks

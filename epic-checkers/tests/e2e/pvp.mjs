@@ -34,18 +34,18 @@ try {
   await R.step('start pvp game', async () => {
     await page.goto(srv.url(`?debug=1&screen=game&mode=pvp&variant=${variant}&epic=${epic ? 1 : 0}&speed=2`));
     await waitApp(page);
-    const st = await waitState(page, "s.phase === 'human'", 60000);
+    const st = await waitState(page, "s.phase === 'human'", 180000);
     assert(st.mode === 'pvp' && st.bottomColor === 1, 'pvp, white at the bottom');
   });
 
   await R.step('six plies tapped by both sides, board stays oriented', async () => {
     for (let i = 0; i < 6; i++) {
-      const st = await waitState(page, "s.phase === 'human' || !!s.result", 30000);
+      const st = await waitState(page, "s.phase === 'human' || !!s.result", 90000);
       if (st.result) break;
       const before = st.ply;
       // prefer a move of the piece nearest the centre for some variety
       await tapMove(st.legal[st.legal.length >> 1]);
-      await waitState(page, `s.ply === ${before + 1} && (s.phase === 'human' || !!s.result)`, 30000);
+      await waitState(page, `s.ply === ${before + 1} && (s.phase === 'human' || !!s.result)`, 90000);
       const flipped = await page.evaluate(() => window.__app.renderer.flipped);
       assert(flipped === false, 'board not flipped');
     }
@@ -85,7 +85,7 @@ try {
     await page.waitForSelector('.ov--confirm');
     await sleep(300);
     await page.click('.ov--confirm .dlg__btns button >> nth=1'); // accept
-    await page.waitForSelector('.ov--gameover', { timeout: 30000 });
+    await page.waitForSelector('.ov--gameover', { timeout: 180000 });
     const st = await appState(page);
     assert(st.result && st.result.winner === 0 && st.result.reason === 'agreement', `result ${JSON.stringify(st.result)}`);
     await sleep(1200);

@@ -56,6 +56,52 @@ const WOODS = {
 };
 
 const woodCache = new Map();
+const woodJobs = new Map();
+
+const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+/**
+ * Resumable per-row pixel generator for the procedural tiles (wood, stone, nebula clouds): either
+ * run to completion on first use (step()), or ahead of time in small idle slices (step(budgetMs))
+ * so a theme switch never freezes on a ~0.5–1 s noise loop on a phone.
+ *   job = pixelJob(S, (data, y, S) => { ...fill row y... }, (canvas, ctx) => result)
+ *   job.step(6) → true when done; job.result
+ */
+export function pixelJob(S, rowFn, finish) {
+  let c = null;
+  let ctx = null;
+  let img = null;
+  let y = 0;
+  const job = {
+    done: false,
+    result: null,
+    get progress() {
+      return y / S;
+    },
+    step(budgetMs = Infinity) {
+      if (job.done) return true;
+      if (!c) {
+        c = makeCanvas(S, S);
+        ctx = c.getContext('2d');
+        img = ctx.createImageData(S, S);
+      }
+      const t0 = budgetMs === Infinity ? 0 : nowMs();
+      while (y < S) {
+        rowFn(img.data, y, S);
+        y++;
+        if (budgetMs !== Infinity && (y & 3) === 0 && nowMs() - t0 >= budgetMs) break;
+      }
+      if (y >= S) {
+        ctx.putImageData(img, 0, 0);
+        job.done = true;
+        job.result = finish ? finish(c, ctx) : c;
+        img = null;
+      }
+      return job.done;
+    },
+  };
+  return job;
+}
 
 /**
  * 512×512 quarter-sawn wood veneer tile, grain running vertically: asymmetric growth rings
@@ -64,42 +110,54 @@ const woodCache = new Map();
  */
 export function woodTile(kind) {
   if (woodCache.has(kind)) return woodCache.get(kind);
+  const job = woodJob(kind);
+  job.step();
+  return job.result;
+}
+
+/** The resumable generator of a wood tile (shared by woodTile() and the idle pre-warm). */
+export function woodJob(kind) {
+  if (woodCache.has(kind)) return { done: true, result: woodCache.get(kind), step: () => true };
+  let job = woodJobs.get(kind);
+  if (job) return job;
   const P = WOODS[kind];
-  const S = 512;
-  const c = makeCanvas(S, S);
-  const ctx = c.getContext('2d');
-  const img = ctx.createImageData(S, S);
-  const d = img.data;
   const nz = new Noise2D(P.seed);
   const [lr, lg, lb] = P.light;
   const [dr, dg, db] = P.dark;
-  for (let y = 0; y < S; y++) {
-    const ny = y / S;
-    for (let x = 0; x < S; x++) {
-      const nx = x / S;
-      const warp = nz.fbm(nx * 1.6, ny * 0.35, 3);
-      const t = nx * P.rings + warp * P.warp + nz.noise(nx * 9, ny * 1.4) * 0.18;
-      const f = t - Math.floor(t);
-      // earlywood gradually darkens into a crisp latewood band
-      let ring = f * f * 0.35 + smooth(0.78, 0.93, f) * (1 - smooth(0.96, 1.0, f)) * 0.9;
-      // ring-to-ring variation
-      ring *= 0.7 + 0.6 * (0.5 + 0.5 * nz.noise(Math.floor(t) * 0.37, 0.5));
-      const pore = Math.max(0, nz.noise(nx * 300, ny * 7) - 0.25) * 1.6;
-      const tone = nz.fbm(nx * 1.2 + 5, ny * 0.5, 2);
-      let v = ring * P.ring + pore * P.pores;
-      if (P.figure) v += P.figure * Math.sin(ny * 110 + nz.noise(nx * 4, ny * 10) * 4);
-      v = clamp01(v);
-      const k = 1 + tone * P.tone * 2;
-      const i = (y * S + x) * 4;
-      d[i] = (lr + (dr - lr) * v) * k;
-      d[i + 1] = (lg + (dg - lg) * v) * k;
-      d[i + 2] = (lb + (db - lb) * v) * k;
-      d[i + 3] = 255;
+  job = pixelJob(
+    512,
+    (d, y, S) => {
+      const ny = y / S;
+      for (let x = 0; x < S; x++) {
+        const nx = x / S;
+        const warp = nz.fbm(nx * 1.6, ny * 0.35, 3);
+        const t = nx * P.rings + warp * P.warp + nz.noise(nx * 9, ny * 1.4) * 0.18;
+        const f = t - Math.floor(t);
+        // earlywood gradually darkens into a crisp latewood band
+        let ring = f * f * 0.35 + smooth(0.78, 0.93, f) * (1 - smooth(0.96, 1.0, f)) * 0.9;
+        // ring-to-ring variation
+        ring *= 0.7 + 0.6 * (0.5 + 0.5 * nz.noise(Math.floor(t) * 0.37, 0.5));
+        const pore = Math.max(0, nz.noise(nx * 300, ny * 7) - 0.25) * 1.6;
+        const tone = nz.fbm(nx * 1.2 + 5, ny * 0.5, 2);
+        let v = ring * P.ring + pore * P.pores;
+        if (P.figure) v += P.figure * Math.sin(ny * 110 + nz.noise(nx * 4, ny * 10) * 4);
+        v = clamp01(v);
+        const k = 1 + tone * P.tone * 2;
+        const i = (y * S + x) * 4;
+        d[i] = (lr + (dr - lr) * v) * k;
+        d[i + 1] = (lg + (dg - lg) * v) * k;
+        d[i + 2] = (lb + (db - lb) * v) * k;
+        d[i + 3] = 255;
+      }
+    },
+    (c) => {
+      woodCache.set(kind, c);
+      woodJobs.delete(kind);
+      return c;
     }
-  }
-  ctx.putImageData(img, 0, 0);
-  woodCache.set(kind, c);
-  return c;
+  );
+  woodJobs.set(kind, job);
+  return job;
 }
 
 /** Fill the polygon `pts` with a wood tile region rotated so the grain runs along `angle`. */
@@ -136,50 +194,74 @@ const stoneCache = new Map();
 /** 256×256 dark glassy stone tiles: 'obsidian' (playable) and 'slate' (non-playable). */
 export function stoneTile(kind) {
   if (stoneCache.has(kind)) return stoneCache.get(kind);
-  const S = 256;
-  const c = makeCanvas(S, S);
-  const ctx = c.getContext('2d');
-  const img = ctx.createImageData(S, S);
-  const d = img.data;
+  const job = stoneJob(kind);
+  job.step();
+  return job.result;
+}
+
+const stoneJobs = new Map();
+
+/** The resumable generator of a stone tile (shared by stoneTile() and the idle pre-warm). */
+export function stoneJob(kind) {
+  if (stoneCache.has(kind)) return { done: true, result: stoneCache.get(kind), step: () => true };
+  let job = stoneJobs.get(kind);
+  if (job) return job;
   const nz = new Noise2D(kind === 'obsidian' ? 101 : 202);
   const rnd = mulberry32(kind === 'obsidian' ? 5 : 9);
   const obs = kind === 'obsidian';
-  for (let y = 0; y < S; y++) {
-    for (let x = 0; x < S; x++) {
-      const nx = x / S;
-      const ny = y / S;
-      const f = nz.fbm(nx * 3, ny * 3, 4);
-      const r2 = nz.ridged(nx * 2.2 + 3, ny * 2.2, 3);
-      const i = (y * S + x) * 4;
-      if (obs) {
-        // deep volcanic glass: near-black with violet/indigo clouds and thin bright veins
-        const vein = Math.pow(r2, 9) * 0.9;
-        const cl = 0.5 + 0.5 * f;
-        d[i] = 5 + cl * 10 + vein * 64;
-        d[i + 1] = 4 + cl * 6 + vein * 40;
-        d[i + 2] = 11 + cl * 20 + vein * 118;
-      } else {
-        // smoked slate: lighter, cooler, softer
-        const cl = 0.5 + 0.5 * f;
-        const vein = Math.pow(r2, 12) * 0.6;
-        d[i] = 21 + cl * 16 + vein * 34;
-        d[i + 1] = 16 + cl * 11 + vein * 26;
-        d[i + 2] = 40 + cl * 26 + vein * 60;
+  job = pixelJob(
+    256,
+    (d, y, S) => {
+      for (let x = 0; x < S; x++) {
+        const nx = x / S;
+        const ny = y / S;
+        const f = nz.fbm(nx * 3, ny * 3, 4);
+        const r2 = nz.ridged(nx * 2.2 + 3, ny * 2.2, 3);
+        const i = (y * S + x) * 4;
+        if (obs) {
+          // deep volcanic glass: near-black with violet/indigo clouds and thin bright veins
+          const vein = Math.pow(r2, 9) * 0.9;
+          const cl = 0.5 + 0.5 * f;
+          d[i] = 5 + cl * 10 + vein * 64;
+          d[i + 1] = 4 + cl * 6 + vein * 40;
+          d[i + 2] = 11 + cl * 20 + vein * 118;
+        } else {
+          // smoked slate: lighter, cooler, softer
+          const cl = 0.5 + 0.5 * f;
+          const vein = Math.pow(r2, 12) * 0.6;
+          d[i] = 21 + cl * 16 + vein * 34;
+          d[i + 1] = 16 + cl * 11 + vein * 26;
+          d[i + 2] = 40 + cl * 26 + vein * 60;
+        }
+        d[i + 3] = 255;
       }
-      d[i + 3] = 255;
+    },
+    (c, ctx) => {
+      const S = 256;
+      // sparse glints
+      for (let k = 0; k < (obs ? 70 : 35); k++) {
+        const x = rnd() * S;
+        const y = rnd() * S;
+        const a = 0.15 + rnd() * 0.4;
+        ctx.fillStyle = `rgba(200,180,255,${a})`;
+        ctx.fillRect(x, y, 1, 1);
+      }
+      stoneCache.set(kind, c);
+      stoneJobs.delete(kind);
+      return c;
     }
-  }
-  ctx.putImageData(img, 0, 0);
-  // sparse glints
-  for (let k = 0; k < (obs ? 70 : 35); k++) {
-    const x = rnd() * S;
-    const y = rnd() * S;
-    const a = 0.15 + rnd() * 0.4;
-    ctx.fillStyle = `rgba(200,180,255,${a})`;
-    ctx.fillRect(x, y, 1, 1);
-  }
-  stoneCache.set(kind, c);
-  return c;
+  );
+  stoneJobs.set(kind, job);
+  return job;
+}
+
+/**
+ * Generators a theme's boards need (for the idle pre-warm): classic → maple, walnut, frame
+ * (+ the Turkish beech last), epic → obsidian, slate.
+ */
+export function boardTileJobs(theme) {
+  if (theme === 'epic') return [() => stoneJob('obsidian'), () => stoneJob('slate')];
+  return [() => woodJob('frame'), () => woodJob('maple'), () => woodJob('walnut'), () => woodJob('turkish')];
 }
 
 // -------------------------------------------------------------------------------- runes

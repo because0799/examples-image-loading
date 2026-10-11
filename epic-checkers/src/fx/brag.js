@@ -10,7 +10,8 @@
 // ЯРОСТЬ meter just filled up: the next capture is the УЛЬТА). Unknown events fall back to 'brag'.
 // ctx (all optional): { n: hits in the combo, name: speaker, opp: opponent name, side: 1 | -1,
 // king: boolean, ultimate: boolean, random: () => [0, 1) for deterministic tests }.
-// Placeholders in lines: {n} {name} {opp}, and the Russian words that agree with {n}: {pieces}
+// Placeholders in lines: {n} {name} (only with ctx.named: the player's own name) {opp}, and the
+// Russian words that agree with {n}: {pieces}
 // («шашка/шашки/шашек»), {persons} («персону/персоны/персон»), {turns} («ход/хода/ходов»). Every
 // line is checked for n = 1..12 by tests/fx/brag.test.js (no «за один прыжок» for multi-jump moves).
 
@@ -30,14 +31,16 @@ export function pluralRu(n, forms) {
 const LINES = {
   ru: {
     capture: [
+      '{name} разносит соперника!',
+      '{name} не знает пощады!',
       'Слишком медленно!',
-      'Ты даже не заметил удара.',
+      'Ты даже моргнуть не успеешь.',
       'Это была лишь разминка.',
       'Минус один. Следующий!',
       'Твоя защита — из бумаги.',
       'Я вижу все твои ходы.',
       'Без шансов!',
-      'Ты открылся. Ошибка.',
+      'Открытая защита — ошибка.',
       'Минус один. Считать умеешь?',
       'Моя доска — мои правила.',
       'Это даже не половина моей силы!',
@@ -50,6 +53,7 @@ const LINES = {
       'Слабое звено — устранено.',
     ],
     combo: [
+      '{name}: минус {n} {pieces} одним ходом!',
       'Одним ходом — минус {n} {pieces}!',
       'Комбо ×{n}! Кто-нибудь, остановите меня!',
       'Это называется — искусство!',
@@ -123,16 +127,17 @@ const LINES = {
       'Списали меня? Зря!',
       'Я поднимаюсь снова!',
       'Камбэк начинается сейчас!',
-      'Рано праздновал!',
+      'Праздновать рано!',
       'Последний герой не сдаётся!',
       'Из пепла — к победе!',
-      'Думал, это конец? Это только начало!',
+      'Конец? Это только начало!',
       'Удача? Нет. Характер!',
       'Сюжетный поворот!',
       'Герои встают даже после падения.',
       'Счёт ещё не окончательный!',
     ],
     win: [
+      '{name} — чемпион этой доски!',
       'Победа была предрешена.',
       'Это было слишком просто.',
       'Запишите в историю!',
@@ -148,13 +153,14 @@ const LINES = {
       'GG. Без шансов.',
       'Мой путь чемпиона продолжается!',
       'Знай своё место!',
-      'Ты сражался достойно… почти.',
+      'Достойный бой… почти.',
     ],
     flawless: [
+      '{name}: безупречная победа!',
       'БЕЗУПРЕЧНО! Ни одной потери!',
       'Ни царапины!',
       'Идеальная победа.',
-      'Ты даже не коснулся меня.',
+      'Ни единой царапины.',
       'Чистая работа. Ноль потерь.',
       'Абсолютное превосходство!',
       'Это был не бой — это был урок.',
@@ -167,7 +173,7 @@ const LINES = {
       'Я вернусь сильнее…',
       'Это ещё не конец.',
       'Запомни этот день. Я вернусь.',
-      'Ты выиграл битву, но не войну.',
+      'Битва за тобой, но не война.',
       'В следующий раз всё будет иначе.',
       'Я тренировался недостаточно…',
       'Поражение — лишь начало моего пути.',
@@ -198,7 +204,7 @@ const LINES = {
       'Я ждал большего.',
       'Ещё одна ошибка — и конец.',
       'Твои шашки плачут.',
-      'Ты уже проиграл. Просто ещё не понял.',
+      'Исход уже решён. Ты просто ещё не знаешь.',
       'Скучно…',
       'Подумай ещё. Хотя нет — не поможет.',
       'Хочешь, дам фору?',
@@ -211,6 +217,7 @@ const LINES = {
       'Я вижу твой страх.',
     ],
     brag: [
+      '{name} в ударе!',
       'Смотри и учись!',
       'Вот как надо!',
       'Гений за работой.',
@@ -255,12 +262,14 @@ const LINES = {
       'Предел достигнут. Готовься.',
       'Ярость кипит. Кто первый под удар?',
     ],
-    dead: ['Ты уже мёртв.', 'Ты уже мёртв. Просто ещё не знаешь.', 'Всё уже кончено.', 'Ты проиграл ещё до удара.'],
+    dead: ['Ты уже мёртв.', 'Ты уже мёртв. Просто ещё не знаешь.', 'Всё уже кончено.', 'Исход решён ещё до удара.'],
     nani: ['НАНИ?!', 'ЧТО?!', 'КАК?!'],
     ko: ['НОКАУТ!', 'К.О.!', 'ЗАНАВЕС!'],
   },
   en: {
     capture: [
+      '{name} is wrecking the rival!',
+      '{name} shows no mercy!',
       'Too slow!',
       "You didn't even see it coming.",
       'That was just my warm-up.',
@@ -281,6 +290,7 @@ const LINES = {
       'Weak link — eliminated.',
     ],
     combo: [
+      '{name}: {n} {pieces} in one move!',
       '{n} {pieces} in a single move!',
       'Combo ×{n}! Somebody stop me!',
       "That's what I call art!",
@@ -364,6 +374,7 @@ const LINES = {
       "The score isn't final yet!",
     ],
     win: [
+      '{name} rules this board!',
       'Victory was destined.',
       'That was too easy.',
       'Write it in the history books!',
@@ -382,6 +393,7 @@ const LINES = {
       'You fought well… almost.',
     ],
     flawless: [
+      '{name}: a flawless victory!',
       'FLAWLESS! Not a single loss!',
       'Not a scratch!',
       'A perfect victory.',
@@ -442,6 +454,7 @@ const LINES = {
       'I can see your fear.',
     ],
     brag: [
+      '{name} is on fire!',
       'Watch and learn!',
       "That's how it's done!",
       'Genius at work.',
@@ -533,7 +546,11 @@ export function bragEvents(lang = 'ru') {
   return Object.keys(LINES[lang === 'en' ? 'en' : 'ru']);
 }
 
-/** A bragging / taunt line for `event` (see the header). Never returns an empty string. */
+/**
+ * A bragging / taunt line for `event` (see the header). Never returns an empty string.
+ * Lines with {name} are only used with ctx.named (the player set their own name, settings.
+ * playerName — «Ты разносит…» would be wrong); then they come up 40 % of the time.
+ */
 export function bragLine(event, ctx = {}, lang = 'ru') {
   lang = lang === 'en' ? 'en' : 'ru';
   const L = LINES[lang];
@@ -542,7 +559,12 @@ export function bragLine(event, ctx = {}, lang = 'ru') {
   if (event === 'multi') bank = 'combo';
   if (bank === 'combo' && (ctx.n || 2) >= 4 && rnd() < 0.65) bank = 'comboBig';
   if (!L[bank]) bank = 'brag';
-  return fill(pick(L[bank], `${lang}|${bank}`, rnd), ctx, lang);
+  const named = !!(ctx.named && ctx.name);
+  const all = L[bank];
+  const withName = named ? all.filter((l) => l.includes('{name}')) : [];
+  if (withName.length && rnd() < 0.4) return fill(pick(withName, `${lang}|${bank}|n`, rnd), ctx, lang);
+  const plain = all.filter((l) => !l.includes('{name}'));
+  return fill(pick(plain.length ? plain : all, `${lang}|${bank}`, rnd), ctx, lang);
 }
 
 /** All lines of an event (for tests / preloading lettering). */

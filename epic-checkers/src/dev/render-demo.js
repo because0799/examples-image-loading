@@ -8,6 +8,11 @@
 //   anim=1 loops: quiet moves, a slow-mo triple capture with camera follow / punch / shake,
 //          promotion, camera focus + dutch angle, reset
 //
+// Personal settings (renderer.applySettings / setSideColors):
+//   &white=gold|green|violet|orange|pink|cyan  &black=…   epic energy colours of the sides
+//   &battery=1 (30 fps, render scale 1, static backdrop)  &backdrop=0 (static backdrop)
+//   &coords=0  &lastmove=0  &idle=0 (never idle: present every frame)  &stats=1 (perf overlay)
+//
 // window.__demo exposes the renderer and helpers for tools/shot.mjs steps, e.g.
 //   {"eval":"__demo.capture()"} {"burst":{"name":"cap","count":12,"interval":90}}
 
@@ -24,7 +29,23 @@ const P = {
   hl: Number(params.get('hl') ?? 1),
   quality: params.get('quality') || 'high',
   hud: params.get('hud') === '1',
+  white: params.get('white'),
+  black: params.get('black'),
+  battery: params.get('battery') === '1',
+  backdrop: params.get('backdrop') !== '0',
+  coords: params.get('coords') !== '0',
+  lastMove: params.get('lastmove') !== '0',
+  idle: params.get('idle') !== '0',
+  stats: params.get('stats') === '1',
 };
+
+const ENERGY = { cyan: 0x29e6ff, gold: 0xffd23f, green: 0x3dff8f, violet: 0xa06cff, orange: 0xff8a2a, pink: 0xff4fd8, crimson: 0xff2e63 };
+const demoSettings = () => ({
+  battery: P.battery,
+  showCoords: P.coords,
+  showLastMove: P.lastMove,
+  fx: { backdrop: P.backdrop },
+});
 
 // ------------------------------------------------------------------------------- page
 document.body.style.margin = '0';
@@ -294,7 +315,10 @@ async function measureFps(ms = 2000) {
 }
 
 (async () => {
+  renderer.applySettings(demoSettings());
+  renderer.idleMode = P.idle;
   await renderer.init({ quality: P.quality });
+  renderer.setSideColors({ 1: ENERGY[P.white], [-1]: ENERGY[P.black] });
   renderer.setTheme(P.theme);
   renderer.setVariant(variant, { flipped: P.flipped });
   renderer.setBoardRect(layoutSlot());
@@ -341,8 +365,30 @@ async function measureFps(ms = 2000) {
       res: renderer.resolution,
       pieces: renderer._live.length,
       tasks: renderer.clock.activeTasks,
+      perf: renderer.perfStats(),
     }),
+    /** live settings: __demo.settings({ battery: true }), __demo.colors('gold', 'cyan') */
+    settings: (patch = {}) => {
+      Object.assign(P, patch);
+      renderer.applySettings(demoSettings());
+      return renderer.perfStats();
+    },
+    colors: (white, black) => {
+      renderer.setSideColors({ 1: ENERGY[white], [-1]: ENERGY[black] });
+      return [renderer.sideColor(1).toString(16), renderer.sideColor(-1).toString(16)];
+    },
     ready: true,
   };
+  if (P.stats) {
+    const box = document.createElement('pre');
+    Object.assign(box.style, { position: 'fixed', left: '6px', top: '4px', margin: '0', color: '#9f9', font: '11px monospace', pointerEvents: 'none', zIndex: 5 });
+    document.body.appendChild(box);
+    let last = { renders: 0, ticks: 0 };
+    setInterval(() => {
+      const s = renderer.perfStats();
+      box.textContent = `${s.quality} ×${s.resolution} cap ${s.fpsCap} | ${s.idle ? 'IDLE' : 'active'} | fps ${s.renders - last.renders}/${s.ticks - last.ticks} | rt ${s.rtRenders} | tex ${s.textureMB} MB`;
+      last = s;
+    }, 1000);
+  }
   if (P.anim) loop();
 })();

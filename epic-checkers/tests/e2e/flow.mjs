@@ -71,7 +71,8 @@ try {
 
   await R.step('START → game, human to move', async () => {
     await page.click('.setup__start');
-    await waitState(page, "s.active && s.screen === 'game' && s.phase === 'human'", 60000);
+    // the epic VS intro now holds its texts until they are readable (textTime): give it time
+    await waitState(page, "s.active && s.screen === 'game' && s.phase === 'human'", 240000);
     const st = await appState(page);
     assert(st.variantId === 'russian' && st.mode === 'ai' && st.humanColor === 1, `config ${JSON.stringify(st)}`);
     assert(st.epic === epic, 'epic flag');
@@ -80,13 +81,13 @@ try {
 
   await R.step('three tapped moves, AI answers each', async () => {
     for (let n = 0; n < 3; n++) {
-      const st = await waitState(page, "s.phase === 'human' || !!s.result", 60000);
+      const st = await waitState(page, "s.phase === 'human' || !!s.result", 120000);
       if (st.result) break;
       const before = st.ply;
       // select a piece first (checks the selection highlights), then tap the route
       const mv = st.legal[0];
       await tapMove(mv);
-      await waitState(page, `s.ply >= ${before + 2} && s.phase === 'human' || !!s.result`, 60000);
+      await waitState(page, `s.ply >= ${before + 2} && s.phase === 'human' || !!s.result`, 120000);
     }
     const st = await appState(page);
     assert(st.ply >= 4, `ply ${st.ply}`);
@@ -142,7 +143,7 @@ try {
     st = await waitState(page, 's.ply >= 1', 20000);
     const g = await page.evaluate(() => window.__app.game.history[0].move.path);
     assert(g.join() === [SQ.e3, SQ.c5, SQ.e7].join(), `played ${g}`);
-    st = await waitState(page, "s.ply >= 2 && s.phase === 'human' || !!s.result", 60000);
+    st = await waitState(page, "s.ply >= 2 && s.phase === 'human' || !!s.result", 120000);
     assert(st.stats.captures[1] === 2 && st.stats.maxCombo[1] === 2, `stats ${JSON.stringify(st.stats)}`);
     assert(st.mismatches === 0, 'no desync after combo');
   });
@@ -161,7 +162,7 @@ try {
     await waitState(page, 's.ply >= 1', 20000);
     const g = await page.evaluate(() => window.__app.game.history[0].move.path);
     assert(g.join() === [SQ.e3, SQ.c5, SQ.a7].join(), `played ${g}`);
-    await waitState(page, "s.phase === 'human' || !!s.result", 60000);
+    await waitState(page, "s.phase === 'human' || !!s.result", 120000);
   });
 
   await R.step('undo again, then hint', async () => {
@@ -206,7 +207,7 @@ try {
     await page.getByRole('button', { name: 'Сдаться' }).first().click();
     await page.waitForSelector('.ov--confirm');
     await page.click('.ov--confirm .dlg__btns button >> nth=1');
-    await page.waitForSelector('.ov--gameover', { timeout: 30000 });
+    await page.waitForSelector('.ov--gameover', { timeout: 180000 }); // after the (readable) finale
     const st = await appState(page);
     assert(st.result && st.result.reason === 'resign' && st.result.winner === -1, `result ${JSON.stringify(st.result)}`);
     await sleep(1500);
@@ -215,9 +216,9 @@ try {
 
   await R.step('rematch starts a fresh game', async () => {
     await page.getByRole('button', { name: 'Реванш' }).first().click();
-    const st = await waitState(page, "s.active && s.ply === 0 && (s.phase === 'human' || s.phase === 'intro')", 30000);
+    const st = await waitState(page, "s.active && s.ply === 0 && (s.phase === 'human' || s.phase === 'intro')", 60000);
     assert(!st.result, 'new game');
-    await waitState(page, "s.phase === 'human'", 30000);
+    await waitState(page, "s.phase === 'human'", 240000);
   });
 
   await R.step('pause → menu', async () => {

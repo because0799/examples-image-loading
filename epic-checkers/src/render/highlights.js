@@ -7,6 +7,9 @@
 //   setHint(path | null)            pulsing cyan path with flowing chevrons
 //   setPath(path)                   partial multi-jump trail (gold)
 //   clear()
+//   setShowLastMove(bool)           settings.showLastMove: hide / show the last-move marker (the
+//                                   path is still tracked, so switching it back on shows it again)
+//   lastMoveColor(path)             epic neon of the last move (the mover's energy colour)
 //
 // Textures are generated per theme + square size; sprites are pooled; pulses are cheap per-frame
 // alpha/scale updates driven in real time (UI feedback is not slowed by slow-mo).
@@ -303,16 +306,47 @@ export class Highlights {
     this._hintPts = null;
     this._hintLen = 0;
     this._selectedPiece = null;
+    this.showLastMove = true;
+  }
+
+  /** Something visible changed: let the renderer leave its idle frame rate. */
+  _wake() {
+    const r = this.r;
+    if (r && typeof r.wake === 'function') r.wake();
+  }
+
+  /** Epic energy colour of a side (the renderer's single source; custom colours included). */
+  _sideColor(side) {
+    const r = this.r;
+    if (r && typeof r.epicSideColor === 'function') return r.epicSideColor(side);
+    return EPIC.side[side];
+  }
+
+  /** settings.showLastMove */
+  setShowLastMove(show) {
+    show = show !== false;
+    if (show === this.showLastMove) return;
+    this.showLastMove = show;
+    this.gLast.visible = show;
+    this._wake();
+  }
+
+  /** The side colours changed: redraw everything tinted by them. */
+  refreshSideColors() {
+    this._drawAll();
+    this._wake();
   }
 
   // -------------------------------------------------------------- public API
   setSelectable(sqs) {
+    this._wake();
     this.state.selectable = sqs ? Array.from(sqs) : [];
     this._drawSelectable();
   }
 
   setSelected(sq) {
     sq = sq == null ? -1 : sq;
+    if (sq !== this.state.selected) this._wake();
     this.state.selected = sq;
     const piece = sq >= 0 ? this.r.pieceAt(sq) : null;
     if (this._selectedPiece && this._selectedPiece !== piece) this._selectedPiece.setSelected(false);
@@ -322,22 +356,26 @@ export class Highlights {
   }
 
   setTargets(sqs, { capture = false } = {}) {
+    this._wake();
     this.state.targets = sqs ? Array.from(sqs) : [];
     this.state.capture = !!capture;
     this._drawTargets();
   }
 
   setLastMove(path) {
+    this._wake();
     this.state.lastMove = path && path.length ? Array.from(path) : null;
     this._drawLast();
   }
 
   setHint(path) {
+    this._wake();
     this.state.hint = path && path.length ? Array.from(path) : null;
     this._drawHint();
   }
 
   setPath(path) {
+    this._wake();
     this.state.path = path && path.length ? Array.from(path) : null;
     this._drawPath();
   }
@@ -416,7 +454,7 @@ export class Highlights {
     if (!path || !path.length) return EPIC.lastMove;
     const v = this.r.pieceAt(path[path.length - 1]);
     const side = v ? v.color : 0;
-    const base = EPIC.side[side];
+    const base = side === 1 || side === -1 ? this._sideColor(side) : null;
     return base != null ? mixHex(base, EPIC.gridHot, 0.42) : EPIC.lastMove;
   }
 
@@ -493,7 +531,7 @@ export class Highlights {
       s.position.set(c.x, c.y);
       if (this.theme === 'epic') {
         const piece = this.r.pieceAt(sq);
-        s.tint = piece ? mixHex(EPIC.side[piece.color], 0xffffff, 0.25) : EPIC.selectable;
+        s.tint = piece ? mixHex(this._sideColor(piece.color), 0xffffff, 0.25) : EPIC.selectable;
       } else {
         s.tint = this.P.selectable;
       }

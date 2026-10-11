@@ -43,6 +43,19 @@ final class NativeBridge {
         }
     }
 
+    /**
+     * Same as vibrate() with a vibration strength 1..255 (the "light" haptics setting). Phones
+     * without amplitude control play the pattern at the default strength.
+     */
+    @JavascriptInterface
+    public void vibrateLevel(String jsonPatternOrMs, int amplitude) {
+        try {
+            haptics.vibrate(jsonPatternOrMs, amplitude);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "bridge.vibrateLevel", e);
+        }
+    }
+
     @JavascriptInterface
     public boolean hasVibrator() {
         return haptics.available();

@@ -4,21 +4,25 @@
 //                     (re-baked only on resize / board move) → a single full-screen quad per frame.
 //   EpicBackdrop    — storm/void: #05030C→#120A2A gradient, purple glow behind the board, drifting
 //                     nebula clouds, distant lightning lighting the clouds, rising embers, vignette.
-//                     The whole nebula stack is rendered into a low-resolution RenderTexture each
-//                     frame (it is soft anyway), so the screen pays one full-screen quad + a few
-//                     dozen tiny ember sprites instead of ~10 full-screen additive layers.
-// Both get a slight parallax from the camera (shake / focus) for depth.
+//                     The whole nebula stack is rendered into a low-resolution RenderTexture (it is
+//                     soft anyway) at ≤ 20 Hz — every frame only while a lightning flash flickers —
+//                     right before a frame is presented (prerender), so the screen pays ONE
+//                     full-screen quad + a few dozen tiny ember sprites instead of ~10 full-screen
+//                     additive layers. setStatic(true) (settings.fx.backdrop off / battery saver)
+//                     freezes it: one RT render, no embers, no lightning.
+// Both get a slight parallax from the camera (shake / focus) for depth; the epic RT carries a
+// margin so the parallax moves the whole texture every frame (smooth even between RT refreshes).
 
 import { Container, Sprite, Graphics, RenderTexture } from 'pixi.js';
-import { drawTexture, makeCanvas, textureFromCanvas, glowTexture, destroyTexture, addGrain } from './canvas.js';
-import { woodTile } from './board-textures.js';
+import { drawTexture, makeCanvas, textureFromCanvas, glowTexture, destroyTexture, grainPattern } from './canvas.js';
+import { woodTile, pixelJob } from './board-textures.js';
 import { Noise2D, mulberry32 } from './noise.js';
 import { EPIC } from './palette.js';
 
 const QUALITY = {
-  high: { clouds: 6, embers: 46, bolts: true, rtRes: 0.5 },
-  medium: { clouds: 4, embers: 26, bolts: true, rtRes: 0.4 },
-  low: { clouds: 3, embers: 10, bolts: false, rtRes: 0.33 },
+  high: { clouds: 6, embers: 46, bolts: true, rtRes: 0.5, rtHz: 20 },
+  medium: { clouds: 4, embers: 26, bolts: true, rtRes: 0.4, rtHz: 20 },
+  low: { clouds: 3, embers: 10, bolts: false, rtRes: 0.33, rtHz: 15 },
 };
 
 // ------------------------------------------------------------------------------- shared textures
@@ -38,22 +42,29 @@ function vignetteTexture() {
 }
 
 const cloudTex = [];
-function cloudTextures() {
-  if (cloudTex.length && !cloudTex[0].destroyed) return cloudTex;
-  cloudTex.length = 0;
-  for (let v = 0; v < 3; v++) {
-    const S = 256;
-    const c = makeCanvas(S, S);
-    const ctx = c.getContext('2d');
-    const img = ctx.createImageData(S, S);
-    const d = img.data;
-    const nz = new Noise2D(300 + v * 17);
-    for (let y = 0; y < S; y++) {
+const cloudCanvases = [null, null, null];
+const cloudJobs = [null, null, null];
+
+/** Resumable generator of nebula cloud v (0..2) (shared by cloudTextures() and the pre-warm). */
+export function cloudJob(v) {
+  if (cloudCanvases[v]) return { done: true, result: cloudCanvases[v], step: () => true };
+  if (cloudJobs[v]) return cloudJobs[v];
+  const nz = new Noise2D(300 + v * 17);
+  const job = pixelJob(
+    256,
+    (d, y, S) => {
       for (let x = 0; x < S; x++) {
         const nx = x / S - 0.5;
         const ny = y / S - 0.5;
         const r = Math.sqrt(nx * nx + ny * ny) * 2;
         const fall = Math.max(0, 1 - r);
+        const i = (y * S + x) * 4;
+        if (fall <= 0) {
+          // outside the falloff disc the cloud is fully transparent: skip the noise
+          d[i] = d[i + 1] = d[i + 2] = 140;
+          d[i + 3] = 0;
+          continue;
+        }
         // domain-warped fbm → billowy body, ridged → bright filaments
         const wx = nz.fbm(nx * 2 + 9, ny * 2, 3) * 0.6;
         const wy = nz.fbm(nx * 2, ny * 2 + 4, 3) * 0.6;
@@ -62,21 +73,43 @@ function cloudTextures() {
         const body = Math.max(0, 0.5 + 0.5 * f - 0.38) * 1.9;
         const fil = Math.pow(ridg, 3) * 1.1;
         const a = Math.min(1, (body * 0.75 + fil * 0.65) * Math.pow(fall, 1.3));
-        const i = (y * S + x) * 4;
         const b = Math.min(1, 0.55 + fil * 0.6);
         d[i] = 255 * b;
         d[i + 1] = 255 * b;
         d[i + 2] = 255 * b;
         d[i + 3] = Math.min(255, a * 255);
       }
+    },
+    (c) => {
+      cloudCanvases[v] = c;
+      cloudJobs[v] = null;
+      return c;
     }
-    ctx.putImageData(img, 0, 0);
-    cloudTex.push(textureFromCanvas(c, 1, { label: 'nebula' }));
+  );
+  cloudJobs[v] = job;
+  return job;
+}
+
+/** Generators the epic backdrop needs (idle pre-warm). */
+export function backdropTileJobs(theme) {
+  return theme === 'epic' ? [0, 1, 2].map((v) => () => cloudJob(v)) : [];
+}
+
+function cloudTextures() {
+  if (cloudTex.length && !cloudTex[0].destroyed) return cloudTex;
+  cloudTex.length = 0;
+  for (let v = 0; v < 3; v++) {
+    const job = cloudJob(v);
+    job.step();
+    cloudTex.push(textureFromCanvas(job.result, 1, { label: 'nebula' }));
   }
   return cloudTex;
 }
 
 // ------------------------------------------------------------------------------- classic
+/** Blurred plank layer of the classic table: { key: 'W|H', canvas } (survives theme switches). */
+let planksCache = null;
+
 export class ClassicBackdrop {
   constructor(renderer) {
     this.r = renderer;
@@ -94,15 +127,17 @@ export class ClassicBackdrop {
   resize(w, h) {
     this._w = w;
     this._h = h;
-    this._bake();
+    this._dirty = true;
+    if (!this._tex) this._bake(); // first size: bake now so the very first frame has a table
   }
 
   setBoard(rect) {
     this._board = rect;
-    this._bake();
+    this._dirty = true; // baked lazily (several layout changes in one frame → one bake)
   }
 
   _bake() {
+    this._dirty = false;
     const w = this._w;
     const h = this._h;
     if (!w || !h) return;
@@ -118,35 +153,8 @@ export class ClassicBackdrop {
     const oy = h * m;
     const c = makeCanvas(W, H);
     const ctx = c.getContext('2d');
-    ctx.fillStyle = '#140b06';
-    ctx.fillRect(0, 0, W, H);
-    // out-of-focus table planks (grain horizontal)
-    const tile = woodTile('frame');
-    const plank = Math.max(90, Math.min(W, H) * 0.3);
-    const rnd = mulberry32(5);
-    ctx.globalAlpha = 0.55;
-    try {
-      ctx.filter = `blur(${Math.max(1.5, Math.min(W, H) * 0.006)}px)`;
-    } catch (e) {
-      /* no canvas filters on old WebViews: sharp planks are fine */
-    }
-    for (let y = -plank * 0.3; y < H; y += plank) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, y, W, plank);
-      ctx.clip();
-      ctx.translate(W / 2, y + plank / 2);
-      ctx.rotate(Math.PI / 2);
-      const sz = 200 + rnd() * 120;
-      ctx.drawImage(tile, rnd() * (512 - sz), rnd() * (512 - sz), sz, sz, -plank / 2 - 2, -W / 2 - 2, plank + 4, W + 4);
-      ctx.restore();
-      ctx.fillStyle = 'rgba(0,0,0,0.35)';
-      ctx.fillRect(0, y - 1, W, 2);
-    }
-    ctx.filter = 'none';
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = 'rgba(14,7,3,0.62)';
-    ctx.fillRect(0, 0, W, H);
+    // the out-of-focus planks do not depend on the board: cached per size
+    ctx.drawImage(this._planks(W, H), 0, 0);
     // warm lamp pool centred slightly above the board centre
     const cx = ox + b.x + b.width / 2;
     const cy = oy + b.y + b.height * 0.45;
@@ -172,7 +180,7 @@ export class ClassicBackdrop {
     ctx.fillStyle = g;
     ctx.fillRect(-W, -H, W * 2, H * 4);
     ctx.restore();
-    addGrain(ctx, 0, 0, W, H, 6, 3);
+    grainPattern(ctx, 0, 0, W, H, 6, 3);
     const old = this._tex;
     this._tex = textureFromCanvas(c, 1, { label: 'table' });
     this.sprite.texture = this._tex;
@@ -184,9 +192,67 @@ export class ClassicBackdrop {
     destroyTexture(old);
   }
 
+  /**
+   * Dark, out-of-focus table planks (W×H), cached per size. Drawn at 1/3 resolution and scaled
+   * up with smoothing — a cheap soft blur. (ctx.filter = 'blur()' took seconds on software 2D
+   * canvases, which Android WebViews fall back to after a getImageData read-back.)
+   */
+  _planks(W, H) {
+    const key = `${W}|${H}`;
+    if (planksCache && planksCache.key === key) return planksCache.canvas;
+    const S = 3;
+    const sw = Math.max(1, Math.ceil(W / S));
+    const sh = Math.max(1, Math.ceil(H / S));
+    const small = makeCanvas(sw, sh);
+    const sctx = small.getContext('2d');
+    sctx.fillStyle = '#140b06';
+    sctx.fillRect(0, 0, sw, sh);
+    sctx.scale(sw / W, sh / H);
+    const tile = woodTile('frame');
+    const plank = Math.max(90, Math.min(W, H) * 0.3);
+    const rnd = mulberry32(5);
+    sctx.globalAlpha = 0.55;
+    for (let y = -plank * 0.3; y < H; y += plank) {
+      sctx.save();
+      sctx.beginPath();
+      sctx.rect(0, y, W, plank);
+      sctx.clip();
+      sctx.translate(W / 2, y + plank / 2);
+      sctx.rotate(Math.PI / 2);
+      const sz = 200 + rnd() * 120;
+      sctx.drawImage(tile, rnd() * (512 - sz), rnd() * (512 - sz), sz, sz, -plank / 2 - 2, -W / 2 - 2, plank + 4, W + 4);
+      sctx.restore();
+      sctx.fillStyle = 'rgba(0,0,0,0.35)';
+      sctx.fillRect(0, y - 1, W, 2 * S * 0.6);
+    }
+    sctx.globalAlpha = 1;
+    const c = makeCanvas(W, H);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    try {
+      ctx.imageSmoothingQuality = 'high';
+    } catch (e) {
+      /* older WebViews: default smoothing */
+    }
+    ctx.drawImage(small, 0, 0, W, H);
+    ctx.fillStyle = 'rgba(14,7,3,0.62)';
+    ctx.fillRect(0, 0, W, H);
+    planksCache = { key, canvas: c };
+    return c;
+  }
+
   setQuality() {}
 
+  /** The classic table is baked once anyway (nothing animates). */
+  setStatic() {}
+
+  prerender() {
+    if (this._dirty) this._bake();
+    return false;
+  }
+
   update(gdt, rdt, t, camera) {
+    if (this._dirty) this._bake();
     // gentle parallax only (the baked texture has a margin so the edges never show)
     this.container.position.set(camera.shakeX * 0.25, camera.shakeY * 0.25);
   }
@@ -206,7 +272,7 @@ export class EpicBackdrop {
     this.container.label = 'backdrop-epic';
     this.rnd = mulberry32(42);
 
-    // ---- offscreen nebula stack (rendered into this.rt)
+    // ---- offscreen nebula stack (rendered into this.rt, in screen coords offset by the margin)
     this.nebula = new Container();
     this._gradTex = drawTexture(4, 256, 1, (ctx, w, h) => {
       const g = ctx.createLinearGradient(0, 0, 0, h);
@@ -217,7 +283,8 @@ export class EpicBackdrop {
       ctx.fillRect(0, 0, w, h);
     }, { label: 'epic-grad' });
     this.grad = new Sprite(this._gradTex);
-    this.core = new Sprite(glowTexture(256, 1.1));
+    // the big soft glows only ever land in the low-resolution RT: small 1× textures are plenty
+    this.core = new Sprite(glowTexture(128, 1.1, 1));
     this.core.anchor.set(0.5);
     this.core.tint = 0x3a1a8a;
     this.core.blendMode = 'add';
@@ -225,8 +292,9 @@ export class EpicBackdrop {
     this.bolt = new Graphics();
     this.bolt.blendMode = 'add';
     this.bolt.alpha = 0;
+    this.bolt.visible = false;
     this.cloudLayer = new Container();
-    this.flash = new Sprite(glowTexture(256, 1.3));
+    this.flash = new Sprite(glowTexture(128, 1.3, 1));
     this.flash.anchor.set(0.5);
     this.flash.blendMode = 'add';
     this.flash.tint = 0xb8a0ff;
@@ -236,6 +304,7 @@ export class EpicBackdrop {
 
     this.rt = null;
     this.screenSprite = new Sprite();
+    this.screenSprite.label = 'nebula';
     this.emberLayer = new Container();
     // the bolt is thin: draw it at full resolution on top of the (soft) nebula texture
     this.container.addChild(this.screenSprite, this.bolt, this.emberLayer);
@@ -245,11 +314,39 @@ export class EpicBackdrop {
     this._emberTex = glowTexture(32, 2.2);
     this._w = 0;
     this._h = 0;
+    this._m = 0; // RT margin (CSS px) so the per-frame parallax never shows an edge
     this._t = 0;
     this._nextFlash = 2.5;
     this._flashT = -1;
     this._flashSeq = null;
+    this._flashI = 0;
+    // RT refresh throttle: the nebula drifts slowly, so ≤ 20 Hz is invisible (game seconds since
+    // the last refresh are accumulated and applied at the next refresh)
+    this._acc = 0;
+    this._age = 1e9;
+    this._needRT = true;
+    this.static = false;
+    /** RT refreshes so far (perf stats) */
+    this.rtRenders = 0;
     this._populate();
+  }
+
+  /** Static backdrop (settings.fx.backdrop off / battery saver): one frozen RT, no embers, no lightning. */
+  setStatic(on) {
+    on = !!on;
+    if (on === this.static) return;
+    this.static = on;
+    this.emberLayer.visible = !on;
+    if (on) {
+      this._flashSeq = null;
+      this._flashT = -1;
+      this._flashI = 0;
+      this.flash.alpha = 0;
+      this.bolt.alpha = 0;
+      this.bolt.visible = false;
+      for (const c of this.clouds) c.litK = 0;
+    }
+    this._needRT = true;
   }
 
   _populate() {
@@ -289,6 +386,7 @@ export class EpicBackdrop {
       this._spawnEmber(e, true);
       this.embers.push(e);
     }
+    this._needRT = true;
   }
 
   _spawnEmber(e, initial) {
@@ -320,21 +418,29 @@ export class EpicBackdrop {
     const h = this._h;
     if (!w || !h) return;
     const res = QUALITY[this.quality].rtRes;
+    const M = (this._m = Math.ceil(Math.max(16, Math.max(w, h) * 0.03)));
+    const W = w + 2 * M;
+    const H = h + 2 * M;
     if (!this.rt) {
-      this.rt = RenderTexture.create({ width: w, height: h, resolution: res, dynamic: true, label: 'nebula-rt' });
+      this.rt = RenderTexture.create({ width: W, height: H, resolution: res, dynamic: true, label: 'nebula-rt' });
       this.screenSprite.texture = this.rt;
     } else {
-      this.rt.resize(w, h, res);
+      this.rt.resize(W, H, res);
     }
-    this.screenSprite.width = w;
-    this.screenSprite.height = h;
+    this.screenSprite.width = W;
+    this.screenSprite.height = H;
+    this.screenSprite.position.set(-M, -M);
+    // nebula content is laid out in screen coords; the RT holds it shifted by the margin
+    this.nebula.position.set(M, M);
+    this.grad.position.set(-M, -M);
+    this.grad.width = W;
+    this.grad.height = H;
+    this._needRT = true;
   }
 
   resize(w, h) {
     this._w = w;
     this._h = h;
-    this.grad.width = w;
-    this.grad.height = h;
     this.vignette.width = w * 1.2;
     this.vignette.height = h * 1.14;
     this.vignette.position.set(-w * 0.1, -h * 0.07);
@@ -346,6 +452,7 @@ export class EpicBackdrop {
     this.core.position.set(rect.x + rect.width / 2, rect.y + rect.height / 2);
     this.core.width = s * 2.2;
     this.core.height = s * 2.0;
+    this._needRT = true;
   }
 
   _triggerFlash() {
@@ -420,25 +527,37 @@ export class EpicBackdrop {
     return pts;
   }
 
-  /** Force a distant lightning strike now (FX can call this for drama). */
+  /** Force a distant lightning strike now (FX can call this for drama). No-op when static. */
   lightning() {
+    if (this.static) return;
     this._triggerFlash();
     this._nextFlash = 3 + this.rnd() * 4;
   }
 
+  /** True while a lightning flash flickers (the RT then refreshes every rendered frame). */
+  get flashing() {
+    return !!this._flashSeq;
+  }
+
+  /**
+   * Per frame (cheap): parallax of the screen sprite / bolt / embers, ember motion and the
+   * lightning timer. The nebula itself is only re-rendered by prerender() (≤ 20 Hz).
+   */
   update(gdt, rdt, t, camera) {
     const dt = gdt / 1000;
-    this._t += dt;
     const w = this._w;
     const h = this._h;
     if (!w || !this.rt) return;
-    // parallax
+    this._acc += dt;
+    this._age += rdt;
+    // parallax: moves the whole (margin-padded) nebula texture → smooth at any RT refresh rate
     const px = camera.shakeX * 0.3 - camera.ox * 0.04;
     const py = camera.shakeY * 0.3 - camera.oy * 0.04;
-    this.cloudLayer.position.set(px * 0.6, py * 0.6);
+    const M = this._m;
+    this.screenSprite.position.set(-M + px * 0.6, -M + py * 0.6);
     this.bolt.position.set(px * 0.6, py * 0.6);
     this.emberLayer.position.set(px, py);
-    this.core.alpha = 0.45 + 0.08 * Math.sin(this._t * 0.7);
+    if (this.static) return;
 
     // lightning
     this._nextFlash -= dt;
@@ -463,36 +582,14 @@ export class EpicBackdrop {
         this._flashSeq = null;
         this._flashT = -1;
         flashI = 0;
+        this._needRT = true; // one more refresh to put the clouds back to their unlit colour
       }
     }
-    this.flash.alpha = flashI * 0.55;
+    this._flashI = flashI;
     this.bolt.alpha = flashI;
+    this.bolt.visible = flashI > 0.002;
 
-    // clouds
-    const big = Math.max(w, h);
-    for (const c of this.clouds) {
-      const s = c.sprite;
-      c.u += c.speed * dt;
-      if (c.u > 1.3) c.u -= 1.6;
-      if (c.u < -0.3) c.u += 1.6;
-      const size = big * 0.7 * c.scale;
-      s.width = size * 1.35;
-      s.height = size;
-      s.position.set(c.u * w, c.v * h + Math.sin(this._t * 0.05 + c.phase) * h * 0.02);
-      s.rotation = c.phase + this._t * c.rot;
-      const lit = c.litK * flashI;
-      s.alpha = Math.min(1, c.alpha * (0.85 + 0.15 * Math.sin(this._t * 0.3 + c.phase)) + lit * 0.9);
-      const tint = lit > 0.05 ? mix(c.color, 0xe4d8ff, Math.min(1, lit)) : c.color;
-      if (tint !== c.tint) {
-        c.tint = tint;
-        s.tint = tint;
-      }
-    }
-    const ro = this._rtOpts || (this._rtOpts = { container: this.nebula, target: this.rt, clear: true });
-    ro.target = this.rt;
-    this.r.app.renderer.render(ro);
-
-    // embers
+    // embers (tiny full-resolution sprites)
     for (const e of this.embers) {
       e.life += dt;
       if (e.life > e.max || e.y < -20) this._spawnEmber(e, false);
@@ -506,6 +603,59 @@ export class EpicBackdrop {
       s.alpha = fade * flick * 0.9;
       s.width = s.height = e.size * (1 - k * 0.4);
     }
+    this._t += dt;
+  }
+
+  /** Is an RT refresh due (forced, lightning flicker, or the 20 Hz period elapsed)? */
+  get rtDue() {
+    if (!this.rt || !this._w) return false;
+    if (this._needRT) return true;
+    if (this.static) return false;
+    if (this._flashSeq) return true;
+    return this._age >= 1000 / (QUALITY[this.quality].rtHz || 20) - 4;
+  }
+
+  /**
+   * Called by the Renderer right before it presents a frame: refresh the nebula RT if due.
+   * Returns true when the RT was re-rendered.
+   */
+  prerender() {
+    if (!this.rtDue) return false;
+    const w = this._w;
+    const h = this._h;
+    const dt = this.static ? 0 : this._acc;
+    this._acc = 0;
+    this._age = 0;
+    this._needRT = false;
+    const T = this._t;
+    this.core.alpha = 0.45 + 0.08 * Math.sin(T * 0.7);
+    const flashI = this.static ? 0 : this._flashI;
+    this.flash.alpha = flashI * 0.55;
+    // clouds
+    const big = Math.max(w, h);
+    for (const c of this.clouds) {
+      const s = c.sprite;
+      c.u += c.speed * dt;
+      if (c.u > 1.3) c.u -= 1.6;
+      if (c.u < -0.3) c.u += 1.6;
+      const size = big * 0.7 * c.scale;
+      s.width = size * 1.35;
+      s.height = size;
+      s.position.set(c.u * w, c.v * h + Math.sin(T * 0.05 + c.phase) * h * 0.02);
+      s.rotation = c.phase + T * c.rot;
+      const lit = c.litK * flashI;
+      s.alpha = Math.min(1, c.alpha * (0.85 + 0.15 * Math.sin(T * 0.3 + c.phase)) + lit * 0.9);
+      const tint = lit > 0.05 ? mix(c.color, 0xe4d8ff, Math.min(1, lit)) : c.color;
+      if (tint !== c.tint) {
+        c.tint = tint;
+        s.tint = tint;
+      }
+    }
+    const ro = this._rtOpts || (this._rtOpts = { container: this.nebula, target: this.rt, clear: true });
+    ro.target = this.rt;
+    this.r.app.renderer.render(ro);
+    this.rtRenders++;
+    return true;
   }
 
   destroy() {

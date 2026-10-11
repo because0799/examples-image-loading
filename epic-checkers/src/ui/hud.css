@@ -94,6 +94,9 @@
   justify-self: center;
   padding: 8px 10px;
   isolation: isolate;
+  /* perf: the panel is composited over the animating canvas every frame; containment keeps any
+     change inside it (counts, thinking dots) from invalidating anything else */
+  contain: layout paint;
   pointer-events: auto;
   --side-color: var(--gold);
   --side-glow: rgba(201, 160, 76, 0.45);
@@ -105,8 +108,8 @@
   border-radius: var(--radius);
   background: var(--panel);
   border: 1px solid var(--line);
-  box-shadow: inset 0 1px 0 var(--panel-hi), 0 6px 18px rgba(0, 0, 0, 0.35);
-  transition: border-color 0.3s, box-shadow 0.3s;
+  box-shadow: inset 0 1px 0 var(--panel-hi);
+  transition: border-color 0.3s;
 }
 .hp__edge {
   position: absolute;
@@ -127,7 +130,7 @@
 }
 .hp.is-active .hp__bg {
   border-color: var(--side-color);
-  box-shadow: inset 0 1px 0 var(--panel-hi), 0 0 0 1px var(--side-color), 0 0 22px -2px var(--side-glow);
+  box-shadow: inset 0 1px 0 var(--panel-hi), inset 0 0 0 1px var(--side-color), inset 0 0 18px -4px var(--side-glow);
 }
 .hp.is-active .hp__edge {
   opacity: 1;
@@ -340,11 +343,11 @@
 }
 .hp__rage-bar i {
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 0;
+  inset: 0;
   background: linear-gradient(90deg, var(--side-color), #fff 96%);
-  box-shadow: 0 0 10px var(--side-color);
-  transition: width 0.5s var(--ease-out);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 0.5s var(--ease-out);
 }
 .hp__rage-ticks {
   position: absolute;
@@ -357,13 +360,7 @@
   font-family: 'Dela Gothic One', var(--font-head);
   font-size: 11px;
   color: #ffd23f;
-  text-shadow: 0 0 8px rgba(255, 210, 63, 0.9), 1px 1px 0 #000;
-  animation: rageText 0.5s steps(2) infinite;
-}
-@keyframes rageText {
-  50% {
-    color: #fff;
-  }
+  text-shadow: 0 0 6px rgba(255, 210, 63, 0.8), 1px 1px 0 #000;
 }
 
 /* ---------------------------------------------------------------- status line */
@@ -373,6 +370,7 @@
   justify-content: center;
   gap: 8px;
   height: 32px;
+  contain: layout style;
   pointer-events: none;
 }
 .status__flag,
@@ -460,11 +458,25 @@
   text-transform: uppercase;
   color: var(--accent);
 }
+.status__pill {
+  position: relative;
+}
+.status__pill::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 3px rgba(255, 77, 77, 0.3), 0 0 14px rgba(255, 77, 77, 0.5);
+  opacity: 0;
+  pointer-events: none;
+}
 .status[data-tone='alert'] .status__pill {
   background: rgba(130, 18, 26, 0.92);
   border-color: #ff4d4d;
   color: #fff;
-  animation: alertPulse 1s ease-in-out infinite;
+}
+.status[data-tone='alert'] .status__pill::after {
+  animation: alertGlow 1s ease-in-out 3;
 }
 .status[data-tone='alert'] .status__dot {
   background: #ff4d4d;
@@ -474,13 +486,14 @@
   border-color: #ffd23f;
   color: #ffd23f;
 }
-@keyframes alertPulse {
+/* opacity only (compositor), three pulses, then the pill stays red and calm */
+@keyframes alertGlow {
   50% {
-    box-shadow: 0 0 0 4px rgba(255, 77, 77, 0.25), 0 0 18px rgba(255, 77, 77, 0.45);
+    opacity: 1;
   }
 }
 .status-flash .status__pill {
-  animation: statusFlash 0.5s var(--ease-back), alertPulse 1s ease-in-out 0.5s infinite;
+  animation: statusFlash 0.5s var(--ease-back);
 }
 @keyframes statusFlash {
   0% {
@@ -493,6 +506,7 @@
 
 /* ---------------------------------------------------------------- action buttons */
 .actions {
+  contain: layout style;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
@@ -530,7 +544,7 @@
   border-radius: var(--radius);
   background: var(--btn-bg);
   border: 1px solid var(--btn-border);
-  box-shadow: inset 0 1px 0 rgba(255, 240, 210, 0.1), 0 6px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 240, 210, 0.1), 0 3px 8px rgba(0, 0, 0, 0.32);
 }
 .act__icon {
   color: var(--accent);
@@ -560,6 +574,7 @@
   right: 4px;
   top: 9%;
   z-index: 3;
+  contain: layout style;
   display: flex;
   flex-direction: column;
   align-items: center;

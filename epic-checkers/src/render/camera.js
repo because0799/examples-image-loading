@@ -67,6 +67,11 @@ export class Camera {
     return this.anchor.y + this.oy;
   }
 
+  /** True while a shake runs (focus / punch / rotate run as clock tasks). */
+  get shaking() {
+    return this._shakes.length > 0;
+  }
+
   /** True when the camera is at rest (identity transform, no shake/punch). */
   get idle() {
     return (

@@ -6,6 +6,18 @@ const S = (body, { fill = false, sw = 2 } = {}) =>
   }" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 
 export const ICONS = {
+  user: S('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>'),
+  palette: S(
+    '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.3"/><circle cx="10.5" cy="7" r="1.3"/><circle cx="15.5" cy="7.5" r="1.3"/>',
+  ),
+  text: S('<path d="M5 6V4h14v2M12 4v16M9 20h6"/>', { sw: 2.2 }),
+  clock: S('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  battery: S('<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M22 11v2M6.5 10.5v3M9.5 10.5v3"/>'),
+  image: S('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.6"/>'),
+  grid: S('<path d="M4 4h16v16H4zM4 9.3h16M4 14.6h16M9.3 4v16M14.6 4v16"/>', { sw: 1.8 }),
+  move: S('<path d="M5 19L19 5M19 5h-7M19 5v7"/><circle cx="5" cy="19" r="1.6"/>'),
+  film: S('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 5v5M12 5v5M17 5v5"/>'),
+  reset: S('<path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v4h4"/>', { sw: 2.2 }),
   back: S('<path d="M15 4l-8 8 8 8"/>', { sw: 2.6 }),
   chevron: S('<path d="M9 5l7 7-7 7"/>', { sw: 2.4 }),
   close: S('<path d="M6 6l12 12M18 6L6 18"/>', { sw: 2.6 }),

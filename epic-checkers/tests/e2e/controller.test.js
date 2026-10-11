@@ -4,7 +4,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Controller, routeMove } from '../../src/controller.js';
+import { Controller, routeMove, hapticsOf, playerNameOf, aiMinDelay, textTimeOf, DEMO_EXTRA_MS } from '../../src/controller.js';
+import { sideColors, ENERGY_COLORS, DEFAULT_SIDE_COLORS } from '../../src/controller-colors.js';
 import { stateFromString, legalMoves, rcToSq } from '../../src/engine/index.js';
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -659,16 +660,125 @@ test('EAD-22: the skip chip only shows for cinematics longer than ~0.9 s', async
   assert.equal(await run(true, 1300), true, 'epic 1.3 s: chip');
 });
 
-test('quality: a settings change goes through onQualitySetting (adaptive quality) or straight to the renderer', async () => {
+test('settings: applySettings reaches every module, gates haptics, forwards to the frame budget', async () => {
+  const env = makeEnv();
+  const { c, renderer, director, calls } = env;
+  const got = [];
+  renderer.applySettings = (st) => got.push(['renderer', st]);
+  director.applySettings = (st) => got.push(['director', st]);
+  c.fx = { quality: 'high', applySettings: (st) => got.push(['fx', st]), setQuality: (q) => got.push(['fx.setQuality', q]), setLang() {} };
+  const haptic = [];
+  c.native.setHaptics = (m) => haptic.push(m);
+  const perf = [];
+  c.perf = { applySettings: (st) => perf.push(st) };
+  const st = c.settings;
+  Object.assign(st, { haptics: 'light', vibration: true, sfxVolume: 0.3, musicVolume: 0.2 });
+  c.applySettings(st);
+  assert.deepEqual(got.map((g) => g[0]), ['renderer', 'fx', 'director']);
+  assert.ok(got.every((g) => g[1] === st), 'the live object itself');
+  assert.deepEqual(haptic, ['light']);
+  assert.equal(perf.length, 1, 'frame budget / quality applied last');
+  st.haptics = 'off';
+  c.applySettings(st);
+  assert.equal(st.vibration, false, 'legacy vibration mirror kept in sync');
+  assert.deepEqual(haptic, ['light', 'off']);
+  // an old settings object without haptics: the boolean decides
+  assert.equal(hapticsOf({ vibration: false }), 'off');
+  assert.equal(hapticsOf({ vibration: true }), 'strong');
+  assert.equal(hapticsOf({ haptics: 'bogus', vibration: true }), 'strong');
+  // a module without applySettings is simply skipped; a throwing one never breaks the others
+  director.applySettings = () => {
+    throw new Error('boom');
+  };
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    c.applySettings(st);
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(perf.length, 3);
+  // quality goes to renderer + FX only when it differs
+  renderer.quality = 'high';
+  c.setQuality('medium');
+  assert.ok(calls.some((x) => x[0] === 'renderer.setQuality' && x[1] === 'medium'));
+  assert.ok(got.some((g) => g[0] === 'fx.setQuality' && g[1] === 'medium'));
+  assert.equal(c.quality, 'medium');
+  c.setQuality('auto');
+  assert.equal(c.quality, 'medium', "'auto' is a setting, not an effective level");
+});
+
+test('settings: playerName names the human (HUD refresh, live); pvp gives it to WHITE; demo ignores it', async () => {
   const env = makeEnv();
   const { c, calls } = env;
-  c.applySettings({ quality: 'medium', lang: 'ru' });
-  assert.ok(calls.some((x) => x[0] === 'renderer.setQuality' && x[1] === 'medium'));
-  assert.equal(c.quality, 'medium');
+  c.settings.playerName = '  Макс  ';
+  await c.startGame({ variantId: 'russian', mode: 'ai', humanColor: -1, epic: true, level: 2 }, { intro: false });
+  await settle();
+  assert.equal(c.players[-1].name, 'Макс');
+  assert.equal(c.players[-1].isHuman, true);
+  const shared = c.players[-1];
+  c.settings.playerName = 'Боец';
+  c.applySettings(c.settings);
+  assert.equal(shared.name, 'Боец', 'the same object the HUD / Director hold is updated');
+  assert.ok(calls.some((x) => x[0] === 'hud.refresh'));
+  c.settings.playerName = '';
+  c.applySettings(c.settings);
+  assert.equal(shared.name, text('hud.you'));
+  c.settings.playerName = 'Макс';
+  await c.startGame({ variantId: 'russian', mode: 'pvp', epic: true }, { intro: false });
+  await settle();
+  assert.equal(c.players[1].name, 'Макс');
+  assert.notEqual(c.players[-1].name, 'Макс');
+  await c.startGame({ variantId: 'russian', mode: 'demo', epic: true, level: 3 }, { intro: false });
+  await settle();
+  assert.ok(c.players[1].name !== 'Макс' && c.players[-1].name !== 'Макс');
+  c.stopGame();
+  assert.equal(playerNameOf({ playerName: 'Очень-длинное-имя-игрока' }, 'Ты'), 'Очень-длинное-им');
+  assert.equal(playerNameOf({ playerName: '   ' }, 'Ты'), 'Ты');
+});
+
+test('settings: playerColor → renderer.setSideColors for the side the player plays (contrast rule)', async () => {
+  const env = makeEnv();
+  const { c, renderer } = env;
   const seen = [];
-  c.onQualitySetting = (q) => seen.push(q);
-  c.applySettings({ quality: 'low', lang: 'ru' });
-  assert.deepEqual(seen, ['low']);
-  c.applySettings({ quality: 'low', lang: 'ru' });
-  assert.deepEqual(seen, ['low'], 'unchanged setting: no call');
+  renderer.setSideColors = (cols) => seen.push(cols);
+  c.settings.playerColor = 'pink';
+  await c.startGame({ variantId: 'russian', mode: 'ai', humanColor: 1, epic: true }, { intro: false });
+  await settle();
+  // pink next to the default crimson is too close: the opponent turns cyan
+  assert.deepEqual(seen.at(-1), { 1: ENERGY_COLORS.pink, '-1': DEFAULT_SIDE_COLORS[1] });
+  await c.startGame({ variantId: 'russian', mode: 'ai', humanColor: -1, epic: true }, { intro: false });
+  await settle();
+  // the human plays BLACK: pink goes there, WHITE keeps cyan
+  assert.deepEqual(seen.at(-1), { '-1': ENERGY_COLORS.pink, 1: DEFAULT_SIDE_COLORS[1] });
+  c.settings.playerColor = 'cyan';
+  c.applySettings(c.settings);
+  // cyan on BLACK next to cyan WHITE: WHITE switches to crimson
+  assert.deepEqual(seen.at(-1), { '-1': ENERGY_COLORS.cyan, 1: DEFAULT_SIDE_COLORS[-1] });
+  const n = seen.length;
+  c.applySettings(c.settings);
+  assert.equal(seen.length, n, 'unchanged colours are not re-applied');
+  c.settings.playerColor = 'auto';
+  c.applySettings(c.settings);
+  assert.equal(seen.at(-1), null, "'auto' = renderer defaults");
+  // two players / demo: WHITE gets the colour
+  c.settings.playerColor = 'violet';
+  await c.startGame({ variantId: 'russian', mode: 'demo', epic: true }, { intro: false });
+  await settle();
+  assert.deepEqual(seen.at(-1), { 1: ENERGY_COLORS.violet, '-1': DEFAULT_SIDE_COLORS[-1] });
+  c.stopGame();
+  assert.deepEqual(sideColors({ playerColor: 'orange', mode: 'pvp' }), { 1: ENERGY_COLORS.orange, '-1': DEFAULT_SIDE_COLORS[1] });
+  assert.deepEqual(sideColors({ playerColor: 'gold', mode: 'ai', humanColor: 1 }), { 1: ENERGY_COLORS.gold, '-1': DEFAULT_SIDE_COLORS[-1] });
+  assert.equal(sideColors({ playerColor: 'auto' }), null);
+});
+
+test('settings: aiPace sets the minimum AI pause; a demo waits a little longer', () => {
+  assert.equal(aiMinDelay({ aiPace: 'fast' }, 'ai'), 300);
+  assert.equal(aiMinDelay({ aiPace: 'normal' }, 'ai'), 700);
+  assert.equal(aiMinDelay({ aiPace: 'slow' }, 'ai'), 1300);
+  assert.equal(aiMinDelay({}, 'ai'), 700);
+  assert.equal(aiMinDelay({ aiPace: 'slow' }, 'demo'), 1300 + DEMO_EXTRA_MS);
+  assert.equal(textTimeOf({ textTime: 3 }), 3);
+  assert.equal(textTimeOf({ textTime: 9 }), 3);
+  assert.equal(textTimeOf({}), 1.5);
 });
