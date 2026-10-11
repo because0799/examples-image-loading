@@ -52,6 +52,8 @@ export async function launchBrowser() {
 export async function newPage(browser, { width = 390, height = 844, dpr = 1, verbose = false } = {}) {
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: dpr, isMobile: true, hasTouch: true });
   const page = await context.newPage();
+  // a loaded machine (software WebGL, parallel suites) can take a while to serve + parse app.js
+  page.setDefaultNavigationTimeout(180000);
   const log = { errors: [], consoleErrors: [], lines: [] };
   page.on('pageerror', (e) => {
     log.errors.push(e.stack || e.message);
