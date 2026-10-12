@@ -57,11 +57,11 @@ alive), `round-limit` (HP-share tiebreak; `winner 0` = draw within 0.5 %), `resi
 | `redirect` | `unit, from, amount` | Vera takes part of the hit aimed at `from` |
 | `execute` | `unit, source, hp` | an execute (Karasu's Midnight) KOs the target outright |
 | `heal` | `source, target, amount, hp, reason?` | `amount` = HP actually restored (may be 0); `reason`: `regen`, `candle`, `awaken`… |
-| `shield` | `target, amount, value, gained, source, turns` | shield set to `amount` (the larger shield stays); `amount: 0` = shield removed |
+| `shield` | `target, amount, value, gained, source, turns` | shield set to `amount` (the larger shield stays); this is also the "Shield" status (no separate `status` event when it is gained). `amount: 0` = shield removed. A shield depleted by damage emits `status shield off (reason 'broken')` and the `damage` event carries `shield: 0` |
 | `survive` | `unit, hp, rule: 'survive' \| 'decoyWard'` | lethal damage avoided (Vera's Stubborn / Nocturna's Double) |
 | `ko` | `unit, sq, by, final?` | a hero is knocked out and removed. `final: true` = her Phoenix Egg was broken (no more revival) |
 | `revive` | `unit, sq, hp, energy, by: 'revive' \| 'hatch', source` | Lucille's Litany or a Phoenix Egg hatching |
-| `awaken` | `unit, sq, full, start?` | Crown gained. `full` = with the one-time heal + 50 energy; `start: true` = born crowned (Liora / boss) |
+| `awaken` | `unit, sq, full, start?` | Crown gained (followed by `status crown on`). `full` = with the one-time heal + 50 energy; `start: true` = born crowned (Liora / boss) |
 | `crownLost` | `unit` | the Crown fell off (startCrowned rule) |
 | `rule` | `unit, rule, target?, stacks?` | a named rule fired: `cocoon`, `retreatOnAdjacent`, `chargeStacks` (stacks spent), `galeEscape` |
 | `bossPhase` | `unit, phase` | 3-B boss entered phase 2 / 3 |

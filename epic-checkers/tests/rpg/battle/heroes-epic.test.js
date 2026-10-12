@@ -2,7 +2,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { battle, only, turn, act, evs, own, U, sq, noCrits, setSeal, addStatus, dmgTo, unitActions } from './helpers.js';
-import { unitStats } from '../../../src/rpg/battle/index.js';
 import { dist } from '../../../src/rpg/battle/board.js';
 
 const full = (s, id) => {
@@ -302,6 +301,5 @@ describe('Kaede — Maple Whirlwind', () => {
   it('quirk Leapfrog: vaults over an adjacent ally as a step', () => {
     const s = only(battle(['kaede', 'vera'], ['shio']), { a0: 'd4', a1: 'e5' });
     assert.ok(unitActions(s, 'a0').moves.includes(sq('f6')));
-    void unitStats;
   });
 });

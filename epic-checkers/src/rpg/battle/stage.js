@@ -2,12 +2,10 @@
 // star gates + collapse), stage rules and boss mechanics.
 
 import { CAMPAIGN, BOSS } from '../data/rules.js';
-import { DARK, parseSq, rowOf, colOf, dist, homeRow } from './board.js';
+import { DARK, parseSq, rowOf, colOf, dist } from './board.js';
 import { nextRand } from './rng.js';
-import { pieceAt, playable, isEmptySq, unitById, hasStatus, homeSquares, nearestEmpty } from './state.js';
-import {
-  emit, spawnZone, removeZone, destroyWard, dealDamage, relocate, addStatus, changeEnergy, spawnWard, flushKos,
-} from './combat.js';
+import { playable, isEmptySq, unitById, homeSquares, nearestEmpty } from './state.js';
+import { emit, spawnZone, removeZone, destroyWard, dealDamage, relocate, addStatus, changeEnergy, spawnWard, flushKos } from './combat.js';
 
 const FILE_COLS = { a: 0, b: 1, c: 2, d: 3, e: 4, f: 5, g: 6, h: 7 };
 
@@ -279,4 +277,3 @@ export function bossExtraDue(s, b) {
   return s.sideTurns[b.side] % BOSS.extraActivationEvery === 0;
 }
 
-export { homeRow, hasStatus, pieceAt };

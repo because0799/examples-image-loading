@@ -1,7 +1,7 @@
 // Statuses (GDD §7), energy & ultimates (§3.6), cooldowns (§3.5), awakening (§3.7), displacement (§3.9).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { battle, only, turn, act, evs, U, sq, noCrits, setSeal, addStatus, dmgTo, own, unitActions, legalActions } from './helpers.js';
+import { battle, only, turn, act, evs, U, sq, noCrits, addStatus, dmgTo, own, unitActions, legalActions } from './helpers.js';
 import { unitStats } from '../../../src/rpg/battle/index.js';
 import { STATUSES } from '../../../src/rpg/data/rules.js';
 
@@ -279,5 +279,4 @@ test('Pull: Maren reels an enemy toward her', () => {
 
 test('status definitions exist for every id used by the engine', () => {
   for (const id of ['burn', 'frozen', 'stun', 'root', 'slow', 'silence', 'taunt', 'mark', 'brittle', 'weaken', 'blight', 'inspire', 'brace', 'regen', 'shield', 'untargetable', 'charge', 'crown', 'stagger', 'break']) assert.ok(STATUSES[id], id);
-  void setSeal;
 });

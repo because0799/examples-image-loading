@@ -36,8 +36,20 @@ export function loadImage(url) {
     const img = new Image();
     img.decoding = 'async';
     img.onload = () => {
-      if (typeof img.decode === 'function') img.decode().then(() => resolve(img), () => resolve(img));
-      else resolve(img);
+      // decode() can wait for a frame that never comes (paused app, frozen test clock): cap it
+      if (typeof img.decode === 'function') {
+        const t = setTimeout(() => resolve(img), 250);
+        img.decode().then(
+          () => {
+            clearTimeout(t);
+            resolve(img);
+          },
+          () => {
+            clearTimeout(t);
+            resolve(img);
+          },
+        );
+      } else resolve(img);
     };
     img.onerror = () => {
       imageCache.delete(url); // allow a later retry
@@ -1489,9 +1501,10 @@ export function paintToken(ctx, C, spec, img) {
 
 // ============================================================================ board
 /**
- * The arena board as one texture: frame (stone + inlay + corner gems) and 64 tiles (light tiles
- * translucent so the arena shows through a little; dark tiles = playable, deeper and glossier with
- * a faint rune). Holes (collapsed squares) are not baked: the view covers them with void tiles.
+ * The arena board as one texture: an ornate frame (layered metal, inlay, rune studs, corner gems)
+ * and 64 tiles. Light tiles are muted, slightly translucent marble (the arena floor shows through
+ * a little); dark tiles (playable) are deep glassy stone with a bevel, a faint glowing rune and
+ * corner sparks in the theme accent. Holes (collapsed squares) are not baked: the view covers them.
  */
 export function paintBoard(theme, L, res = 1) {
   if (!hasDom()) return Texture.WHITE;
@@ -1499,54 +1512,77 @@ export function paintBoard(theme, L, res = 1) {
   const fw = L.fw;
   const sq = L.sq;
   const r = Math.max(1, Math.min(2, res));
+  const R = rng(theme.id.length * 131 + 7);
   const c = paint(T, T, r, (ctx) => {
-    // drop shadow halo around the board
+    // soft drop shadow so the board floats over the arena
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.65)';
-    ctx.shadowBlur = fw * 1.4 * r;
+    ctx.shadowColor = 'rgba(0,0,0,0.7)';
+    ctx.shadowBlur = fw * 1.6 * r;
     ctx.fillStyle = css(theme.frame[2]);
-    ctx.fillRect(fw * 0.35, fw * 0.35, T - fw * 0.7, T - fw * 0.7);
+    ctx.fillRect(fw * 0.4, fw * 0.4, T - fw * 0.8, T - fw * 0.8);
     ctx.restore();
-    // frame
-    const fg = ctx.createLinearGradient(0, 0, T, T);
-    fg.addColorStop(0, css(theme.frame[0]));
-    fg.addColorStop(0.5, css(theme.frame[1]));
-    fg.addColorStop(1, css(theme.frame[2]));
-    ctx.fillStyle = fg;
+    // frame: dark core + metal bands
+    ctx.fillStyle = css(mix(theme.frame[2], 0x000000, 0.35));
     ctx.fillRect(0, 0, T, T);
-    // bevel
-    ctx.lineWidth = Math.max(1, fw * 0.12);
-    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-    ctx.strokeRect(ctx.lineWidth / 2, ctx.lineWidth / 2, T - ctx.lineWidth, T - ctx.lineWidth);
-    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
-    ctx.strokeRect(fw - ctx.lineWidth * 1.5, fw - ctx.lineWidth * 1.5, T - 2 * fw + ctx.lineWidth * 3, T - 2 * fw + ctx.lineWidth * 3);
-    // inlay line
-    ctx.lineWidth = Math.max(1, fw * 0.14);
+    const band = (inset, w, a, b) => {
+      const g = ctx.createLinearGradient(0, 0, T, T);
+      g.addColorStop(0, css(a));
+      g.addColorStop(0.5, css(b));
+      g.addColorStop(1, css(a));
+      ctx.strokeStyle = g;
+      ctx.lineWidth = w;
+      ctx.strokeRect(inset + w / 2, inset + w / 2, T - 2 * inset - w, T - 2 * inset - w);
+    };
+    band(0, fw * 0.34, theme.frame[1], theme.frame[0]);
+    band(fw * 0.34, fw * 0.3, mix(theme.frame[2], 0x000000, 0.2), theme.frame[2]);
+    band(fw * 0.64, fw * 0.22, theme.frame[1], theme.frame[0]);
+    // inlay line + rune studs along every edge (one per square)
+    ctx.lineWidth = Math.max(1, fw * 0.09);
     ctx.strokeStyle = css(theme.inlay);
-    ctx.strokeRect(fw * 0.42, fw * 0.42, T - fw * 0.84, T - fw * 0.84);
-    // corner gems + mid-edge studs
+    ctx.strokeRect(fw * 0.47, fw * 0.47, T - fw * 0.94, T - fw * 0.94);
+    const stud = (x, y, s, col) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = col;
+      ctx.fillRect(-s / 2, -s / 2, s, s);
+      ctx.restore();
+    };
+    for (let i = 0; i < 8; i++) {
+      const m = fw + (i + 0.5) * sq;
+      const col = rgba(theme.accent, 0.85);
+      stud(m, fw * 0.47, fw * 0.22, col);
+      stud(m, T - fw * 0.47, fw * 0.22, col);
+      stud(fw * 0.47, m, fw * 0.22, col);
+      stud(T - fw * 0.47, m, fw * 0.22, col);
+    }
+    // corner gems
     const gemAt = (x, y, s) => {
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(Math.PI / 4);
+      ctx.shadowColor = rgba(theme.gem, 0.9);
+      ctx.shadowBlur = s * 0.8 * r;
       ctx.fillStyle = radial(ctx, -s * 0.2, -s * 0.2, s, [
         [0, '#ffffff'],
         [0.35, css(mix(theme.gem, 0xffffff, 0.35))],
         [1, css(mix(theme.gem, 0x000000, 0.45))],
       ]);
       ctx.fillRect(-s / 2, -s / 2, s, s);
-      ctx.strokeStyle = 'rgba(20,10,0,0.8)';
-      ctx.lineWidth = Math.max(0.8, s * 0.1);
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(20,10,0,0.85)';
+      ctx.lineWidth = Math.max(0.8, s * 0.12);
       ctx.strokeRect(-s / 2, -s / 2, s, s);
       ctx.restore();
     };
-    const gs = fw * 0.62;
+    const gs = fw * 0.78;
     for (const [x, y] of [[fw / 2, fw / 2], [T - fw / 2, fw / 2], [fw / 2, T - fw / 2], [T - fw / 2, T - fw / 2]]) gemAt(x, y, gs);
-    for (const [x, y] of [[T / 2, fw / 2], [T / 2, T - fw / 2], [fw / 2, T / 2], [T - fw / 2, T / 2]]) gemAt(x, y, gs * 0.6);
-    // tiles
+    // the playing area: a dark glass plate first (light tiles are translucent over it)
     const bx = fw;
     const by = fw;
     ctx.clearRect(bx, by, 8 * sq, 8 * sq);
+    ctx.fillStyle = rgba(mix(theme.dark[1], 0x000000, 0.3), 0.55);
+    ctx.fillRect(bx, by, 8 * sq, 8 * sq);
     for (let row = 0; row < 8; row++) {
       for (let col = 0; col < 8; col++) {
         const x = bx + col * sq;
@@ -1558,42 +1594,62 @@ export function paintBoard(theme, L, res = 1) {
           g.addColorStop(1, rgba(theme.light[1], theme.lightAlpha));
           ctx.fillStyle = g;
           ctx.fillRect(x, y, sq, sq);
-          ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-          ctx.lineWidth = Math.max(0.6, sq * 0.02);
-          ctx.strokeRect(x + ctx.lineWidth, y + ctx.lineWidth, sq - ctx.lineWidth * 2, sq - ctx.lineWidth * 2);
+          // marble veins
+          ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+          ctx.lineWidth = Math.max(0.5, sq * 0.012);
+          ctx.beginPath();
+          let vx = x + R() * sq;
+          let vy = y;
+          ctx.moveTo(vx, vy);
+          for (let k = 0; k < 4; k++) {
+            vx += (R() - 0.5) * sq * 0.5;
+            vy += sq * 0.25;
+            ctx.lineTo(Math.max(x, Math.min(x + sq, vx)), vy);
+          }
+          ctx.stroke();
+          // soft inner shade
+          ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+          ctx.lineWidth = Math.max(0.6, sq * 0.04);
+          ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2, sq - ctx.lineWidth, sq - ctx.lineWidth);
         } else {
-          const g = ctx.createRadialGradient(x + sq * 0.5, y + sq * 0.4, sq * 0.05, x + sq * 0.5, y + sq * 0.5, sq * 0.75);
-          g.addColorStop(0, rgba(mix(theme.dark[0], 0xffffff, 0.12), theme.darkAlpha));
-          g.addColorStop(0.7, rgba(theme.dark[0], theme.darkAlpha));
+          const g = ctx.createRadialGradient(x + sq * 0.42, y + sq * 0.36, sq * 0.04, x + sq * 0.5, y + sq * 0.5, sq * 0.78);
+          g.addColorStop(0, rgba(mix(theme.dark[0], theme.accent, 0.12), theme.darkAlpha));
+          g.addColorStop(0.65, rgba(theme.dark[0], theme.darkAlpha));
           g.addColorStop(1, rgba(theme.dark[1], theme.darkAlpha));
           ctx.fillStyle = g;
           ctx.fillRect(x, y, sq, sq);
-          // gloss
-          const gl = ctx.createLinearGradient(x, y, x, y + sq);
-          gl.addColorStop(0, 'rgba(255,255,255,0.14)');
-          gl.addColorStop(0.45, 'rgba(255,255,255,0.02)');
-          gl.addColorStop(1, 'rgba(255,255,255,0)');
-          ctx.fillStyle = gl;
-          ctx.fillRect(x, y, sq, sq * 0.5);
-          // inner glow edge in the accent
-          ctx.strokeStyle = rgba(theme.accent, 0.28);
-          ctx.lineWidth = Math.max(0.8, sq * 0.035);
-          ctx.strokeRect(x + sq * 0.05, y + sq * 0.05, sq * 0.9, sq * 0.9);
-          // faint rune ring
-          ctx.strokeStyle = rgba(theme.rune, 0.1);
-          ctx.lineWidth = Math.max(0.6, sq * 0.018);
+          // bevel: light top-left, dark bottom-right
+          const bw = Math.max(1, sq * 0.06);
+          ctx.fillStyle = 'rgba(255,255,255,0.10)';
+          poly(ctx, [x, y, x + sq, y, x + sq - bw, y + bw, x + bw, y + bw, x + bw, y + sq - bw, x, y + sq]);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(0,0,0,0.35)';
+          poly(ctx, [x + sq, y + sq, x, y + sq, x + bw, y + sq - bw, x + sq - bw, y + sq - bw, x + sq - bw, y + bw, x + sq, y]);
+          ctx.fill();
+          // glowing rune ring + four sparks
+          ctx.save();
+          ctx.shadowColor = rgba(theme.accent, 0.8);
+          ctx.shadowBlur = sq * 0.12 * r;
+          ctx.strokeStyle = rgba(theme.rune, 0.2);
+          ctx.lineWidth = Math.max(0.6, sq * 0.02);
           circle(ctx, x + sq / 2, y + sq / 2, sq * 0.3);
           ctx.stroke();
-          ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-          ctx.lineWidth = Math.max(0.6, sq * 0.02);
-          ctx.strokeRect(x, y, sq, sq);
+          ctx.restore();
+          ctx.fillStyle = rgba(theme.accent, 0.35);
+          for (const [ux, uy] of [[0.12, 0.12], [0.88, 0.12], [0.12, 0.88], [0.88, 0.88]]) {
+            starPath(ctx, x + sq * ux, y + sq * uy, 4, sq * 0.045, sq * 0.012);
+            ctx.fill();
+          }
         }
       }
     }
-    // inner frame lip
-    ctx.strokeStyle = rgba(theme.inlay, 0.85);
-    ctx.lineWidth = Math.max(1, fw * 0.1);
+    // inner lip of the frame
+    ctx.strokeStyle = rgba(theme.inlay, 0.9);
+    ctx.lineWidth = Math.max(1, fw * 0.12);
     ctx.strokeRect(bx - ctx.lineWidth / 2, by - ctx.lineWidth / 2, 8 * sq + ctx.lineWidth, 8 * sq + ctx.lineWidth);
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = Math.max(1, fw * 0.05);
+    ctx.strokeRect(bx + ctx.lineWidth / 2, by + ctx.lineWidth / 2, 8 * sq - ctx.lineWidth, 8 * sq - ctx.lineWidth);
   });
   return textureFromCanvas(c, c.width / T, { label: 'rpg-board' });
 }
@@ -1677,10 +1733,10 @@ export class GlyphFont {
     const metrics = chars.map((ch) => ({ ch, adv: ch === ' ' || ch === ' ' ? size * 0.28 : m.measureText(ch).width }));
     let W = 0;
     for (const mt of metrics) W += Math.ceil(mt.adv + pad * 2) + 2;
-    const res = this.res;
-    const canvas = makeCanvas(Math.ceil(W * res), Math.ceil(cellH * res));
+    const R = this.res;
+    const canvas = makeCanvas(Math.ceil(W * R), Math.ceil(cellH * R));
     const ctx = canvas.getContext('2d');
-    ctx.scale(res, res);
+    ctx.scale(R, R);
     ctx.font = fontStr;
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';
@@ -1695,7 +1751,7 @@ export class GlyphFont {
         if (g) {
           ctx.save();
           ctx.shadowColor = g;
-          ctx.shadowBlur = size * 0.22 * res;
+          ctx.shadowBlur = size * 0.22 * R;
           ctx.strokeStyle = stroke;
           ctx.lineWidth = size * strokeK;
           ctx.strokeText(mt.ch, tx, cy);
@@ -1713,7 +1769,7 @@ export class GlyphFont {
       }
       x += w + 2;
     }
-    this.texture = textureFromCanvas(canvas, res, { label: 'rpg-glyphs' });
+    this.texture = textureFromCanvas(canvas, R, { label: 'rpg-glyphs' });
     const src = this.texture.source;
     for (const p of places) {
       this.glyphs[p.ch] = {

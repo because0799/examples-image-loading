@@ -33,7 +33,7 @@ class Bits {
     s.texture = typeof frame === 'string' ? this.vx.view.icons.frame(frame) : frame;
     s.anchor.set(0.5);
     s.visible = true;
-    s.blendMode = 'normal';
+    s.blendMode = 'inherit';
     s.tint = o.tint != null ? o.tint : 0xffffff;
     s.alpha = 0;
     s.rotation = o.rot || 0;
@@ -184,7 +184,7 @@ export class VFX {
     s.tint = o.tint != null ? o.tint : 0xffffff;
     s.alpha = o.alpha != null ? o.alpha : 1;
     s.rotation = o.rot || 0;
-    s.blendMode = 'normal';
+    s.blendMode = 'inherit';
     s.visible = true;
     s.position.set(o.x || 0, o.y || 0);
     s.scale.set(1);
@@ -197,8 +197,8 @@ export class VFX {
     const t = s.texture.orig;
     const sx = w / (t.width || 1);
     s.scale.set(sx, h != null ? h / (t.height || 1) : sx);
-    s._sx = s.scale.x;
-    s._sy = s.scale.y;
+    s.rvSx = s.scale.x;
+    s.rvSy = s.scale.y;
     return s;
   }
 
@@ -617,7 +617,7 @@ export class VFX {
     const v = this.view;
     switch (el) {
       case 'flame':
-        this.fxCall('explosion', cx, cy, { color: 0xff6a20, size: Math.min(1.4, 0.6 + pts.length * 0.12) * this.k });
+        this.fxCall('explosion', cx, cy, { color: 0xff5b20, size: Math.min(0.85, 0.45 + pts.length * 0.08) * this.k });
         pts.forEach((p, i) => v.later(i * 40, () => {
           this.emit('fire', p.x, p.y, { count: 8, color: E.color, size: 0.8 });
           this.pulse('dot', this.L.vfxOver, { x: p.x, y: p.y, tint: 0xff8a3a, w0: sq * 0.5, w1: sq * 1.6, ms: 260 });
@@ -984,9 +984,9 @@ export class VFX {
         v.sfx('whoosh', { intensity: 0.8 });
         break;
       case 'detonation':
-        this.fxCall('explosion', p.x, p.y, { color: 0xff6a3a, size: 0.95 * this.k });
+        this.fxCall('explosion', p.x, p.y, { color: 0xff6a3a, size: 0.6 * this.k });
         this.emit('spark', p.x, p.y, { count: 14, color: c1 });
-        this.fxCall('flash', 0xff8a3a, { alpha: 0.22, duration: 160 });
+        this.pulse('glowRing', this.L.vfxOver, { x: p.x, y: p.y, tint: c1, w0: sq * 0.6, w1: sq * 2.6, ms: 380 });
         v.shake(0.38, 300);
         v.sfx('explosion', { intensity: 1 });
         break;

@@ -3,25 +3,16 @@
 import { BATTLE, ENERGY, STATUSES } from '../data/rules.js';
 import { unitDef } from './defs.js';
 import { seedHash, nextRand } from './rng.js';
-import { dist, neighbors, parseSq, isDark, deployRows, rowOf } from './board.js';
-import {
-  STATE_VERSION, cloneState, makeUnit, unitById, wardById, pieceAt, hasStatus, isDisabled, autoDeploy, presetSquares, playable,
-  homeSquares, nearestEmpty, totalHpShare, deploySquares,
-} from './state.js';
+import { dist, neighbors, parseSq, rowOf } from './board.js';
+import { STATE_VERSION, cloneState, makeUnit, unitById, wardById, pieceAt, hasStatus, isDisabled, autoDeploy, presetSquares, playable, homeSquares, nearestEmpty, totalHpShare, deploySquares } from './state.js';
 import { atkEff, skillCooldownAdd, healPct } from './stats.js';
 import { moveOptions, pendingOptions, retreatSquare } from './movement.js';
-import {
-  emit, changeEnergy, addStatus, removeStatus, removeSeal, healUnit, dealDamage, flushKos, landed, relocate, spawnWard, destroyWard,
-  removeZone, zoneAffects, runZoneEffects, reviveUnit, unitStats, sideStats,
-} from './combat.js';
+import { emit, changeEnergy, addStatus, removeStatus, removeSeal, healUnit, dealDamage, flushKos, landed, relocate, spawnWard, destroyWard, removeZone, zoneAffects, runZoneEffects, reviveUnit, unitStats, sideStats } from './combat.js';
 import { subCtx, runEffects, execChain } from './effects.js';
 import { fire, fireSide } from './triggers.js';
-import {
-  basicPicks, matchBasic, skillOptions, ultOptions, quirkOptions, jumpOptions, matchPick, activatableUnits, tossLanding, safestSquare,
-} from './actions.js';
+import { basicPicks, matchBasic, skillOptions, ultOptions, quirkOptions, jumpOptions, activatableUnits, tossLanding, safestSquare } from './actions.js';
 import { resolveStage, bossFor, bossVariant, initialHoles, stageSetup, stageRoundStart, stageTurnStart, stageAfterMove, bossExtraDue } from './stage.js';
-import { abilityDamages } from './targeting.js';
-import { dirBetween } from './board.js';
+import { abilityDamages, matchPick } from './targeting.js';
 
 const ACTION_KINDS = ['basic', 'skill', 'ult', 'quirk', 'jump'];
 
@@ -52,7 +43,7 @@ function emptyStats() {
 // -------------------------------------------------------------------------------------- creation
 
 function validateSquad(squad, side) {
-  if (!Array.isArray(squad) || squad.length < 1 || squad.length > 8) throw new Error(`createBattle: side ${side} needs 1..6 heroes`);
+  if (!Array.isArray(squad) || squad.length < 1 || squad.length > 6) throw new Error(`createBattle: side ${side} needs 1..6 heroes`);
 }
 
 /**
@@ -127,6 +118,7 @@ export function createBattle(opts = {}) {
       u.awakened = true;
       u.statuses.push({ id: 'crown', turns: null, stacks: 1, source: u.id, seq: ++s.seq });
       emit(ctx, { type: 'awaken', unit: u.id, sq: u.sq, full: false, start: true });
+      emit(ctx, { type: 'status', target: u.id, status: 'crown', turns: null, stacks: 1, on: true, source: u.id });
     }
     if (rules.decoyWard) {
       const p = rules.decoyWard;
@@ -664,8 +656,11 @@ function advance(ctx) {
   setResult(ctx, 0, 'stalemate');
 }
 
-function tickList(list, fresh) {
-  // returns entries that expire
+/**
+ * Tick durations of statuses / seals / wards / zones at the end of their side's turn. Entries gained
+ * during that same turn ("fresh") skip this tick. Returns the entries that expire.
+ */
+function tickList(list) {
   const out = [];
   for (const x of list) {
     if (x.turns == null) continue;
@@ -864,4 +859,3 @@ export function setResult(ctx, winner, reason) {
   emit(ctx, { type: 'victory', winner, reason, round: s.round });
 }
 
-export { dirBetween, isDark, deployRows };

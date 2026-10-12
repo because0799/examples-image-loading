@@ -1,15 +1,12 @@
 // Generic effect interpreter (effects.md §3): runs ability / trigger / zone / ward effect lists.
 
 import { unitDef } from './defs.js';
-import { stepSq, dist, neighbors, DIRS } from './board.js';
+import { stepSq, dist, neighbors } from './board.js';
 import { pieceAt, isEmptySq, hasStatus, playable, unitById } from './state.js';
 import { checkCond, statValue } from './stats.js';
 import { resolveWho, areaReceivers, sortByPick } from './targeting.js';
 import { jumpParams, canJumpOver } from './movement.js';
-import {
-  emit, dealDamage, healUnit, healAmount, giveShield, addStatus, removeStatus, cleanse, dispel, addSeal, changeEnergy, pushUnit, pullUnit,
-  swapUnits, relocate, spawnWard, spawnZone, revivable, revivePlace, reviveUnit, awakenUnit, flushKos, queueKo, landed, unitStats,
-} from './combat.js';
+import { emit, dealDamage, healUnit, healAmount, giveShield, addStatus, removeStatus, cleanse, dispel, addSeal, changeEnergy, pushUnit, pullUnit, swapUnits, relocate, spawnWard, spawnZone, revivable, revivePlace, reviveUnit, awakenUnit, flushKos, queueKo, landed, unitStats } from './combat.js';
 import { fire } from './triggers.js';
 
 /** Per-ability execution context sharing the engine context E. */
@@ -395,4 +392,3 @@ export function execChain(ctx, c, hops, op = null) {
   return { hops: total, damaging: n };
 }
 
-export { DIRS };

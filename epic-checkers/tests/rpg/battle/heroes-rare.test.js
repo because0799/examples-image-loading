@@ -2,8 +2,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { battle, only, turn, act, evs, own, U, sq, noCrits, setSeal, addStatus, dmgTo, unitActions } from './helpers.js';
-import { unitStats } from '../../../src/rpg/battle/index.js';
-import { dist } from '../../../src/rpg/battle/board.js';
 
 const full = (s, id) => {
   U(s, id).energy = U(s, id).maxEnergy;
@@ -319,7 +317,5 @@ describe('Mara — Night Thief', () => {
     const s = noCrits(tough(only(battle(['mara'], ['zlata', 'shio']), { a0: 'c3', b0: 'd4', b1: 'h8' }), 'b0'));
     const r = act(s, { type: 'jump', unit: 'a0', path: [sq('c3'), sq('e5')] });
     assert.equal(unitActions(r.state, 'a0').pending.kind, 'freeMove');
-    void dist;
-    void unitStats;
   });
 });

@@ -2,7 +2,7 @@
 // and resolve effect receivers (`who`, effects.md §3).
 
 import { unitDef } from './defs.js';
-import { DARK, DIRS, stepSq, dist, dirBetween, rowOf, colOf, between, neighbors, sqOf, onBoard } from './board.js';
+import { DARK, stepSq, dist, dirBetween, rowOf, colOf, between, neighbors, sqOf, onBoard } from './board.js';
 import { occupancy, playable, hasStatus, unitById, pieceById, pieceAt } from './state.js';
 import { jumpChains } from './movement.js';
 
@@ -559,4 +559,3 @@ export function resolveWho(ctx, who, eff) {
   }
 }
 
-export { DIRS };

@@ -1,7 +1,7 @@
 // Damage formula (GDD §4), elements (§5), seals & reactions (§6, effects.md §9), role traits (§8).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { battle, only, turn, act, evs, U, sq, noCrits, setSeal, addStatus, dmgTo, unitActions } from './helpers.js';
+import { battle, only, turn, act, evs, U, sq, noCrits, setSeal, dmgTo } from './helpers.js';
 import { reactionFor, ELEMENT_ORDER, REACTIONS } from '../../../src/rpg/data/rules.js';
 import { critChance } from '../../../src/rpg/battle/stats.js';
 import { previewAction, unitStats } from '../../../src/rpg/battle/index.js';
@@ -223,8 +223,6 @@ test('Seals: same element refreshes, another natural element replaces, celestial
   const { r: r3 } = basicHit('zlata', 'shio');
   assert.deepEqual(U(r3.state, 'b0').seals, []);
   // seal expiry: 2 turns of the holder's side
-  const st = r3.state;
-  void st;
   const { r: r4 } = basicHit('vera', 'zlata');
   let s4 = r4.state; // now side -1 to act
   assert.equal(U(s4, 'b0').seals.length, 1);
@@ -243,7 +241,6 @@ test('previewAction forecasts damage, reactions and KOs without consuming random
   assert.equal(p.targets.b0.reaction, 'steam');
   assert.equal(s.rng, p.state.rng);
   assert.equal(previewAction(s, { type: 'basic', unit: 'a0', target: sq('h8') }), null);
-  void unitActions;
 });
 
 test('every reaction id is reachable', () => {
@@ -253,4 +250,12 @@ test('every reaction id is reachable', () => {
     if (r) seen.add(r);
   }
   assert.deepEqual([...seen].sort(), Object.keys(REACTIONS).sort());
+});
+
+test('Steady Aim does not apply to a Ranger\'s jump-strike (the jump is movement)', () => {
+  const s = noCrits(only(battle(['falk'], ['mara', 'vera']), { a0: 'c3', b0: 'd4', b1: 'a7' }));
+  U(s, 'b0').def = 0;
+  U(s, 'a0').atk = 1000;
+  const r = act(s, { type: 'jump', unit: 'a0', path: [sq('c3'), sq('e5')] });
+  assert.equal(dmgTo(r.events, 'b0'), Math.floor(1000 * 0.8));
 });

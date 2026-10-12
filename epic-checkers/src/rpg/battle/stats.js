@@ -4,7 +4,7 @@
 import { STATUSES, AWAKEN, DAMAGE, ROLES, BOSS } from '../data/rules.js';
 import { unitDef } from './defs.js';
 import { dist, rowsAdvanced, neighbors } from './board.js';
-import { hasStatus, statusValue, pieceAt, isDisabled, unitById } from './state.js';
+import { hasStatus, pieceAt, isDisabled, unitById } from './state.js';
 
 // Status → stat contributions (rules.js STATUSES[*].effect, value from the instance or the default).
 const STATUS_STAT = {
@@ -289,4 +289,3 @@ export function unitStats(s, id) {
   };
 }
 
-export { statusValue };

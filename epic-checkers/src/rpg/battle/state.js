@@ -3,14 +3,14 @@
 
 import { HERO_BY_ID } from '../data/heroes.js';
 import { statsAt, ENERGY, STATUSES } from '../data/rules.js';
-import { heroDef, unitDef } from './defs.js';
+import { heroDef } from './defs.js';
 import { DARK, isDark, rowOf, colOf, dist, homeRow, deployRows, parseSq, neighbors } from './board.js';
 
 export const STATE_VERSION = 1;
 
 // ------------------------------------------------------------------------------------------ clone
 
-function deepClone(v) {
+export function deepClone(v) {
   if (v === null || typeof v !== 'object') return v;
   if (Array.isArray(v)) {
     const n = v.length;
@@ -75,8 +75,6 @@ export function cloneState(s) {
   c.stats = { units, sides: { 1: cloneSideStats(s.stats.sides[1]), '-1': cloneSideStats(s.stats.sides[-1]) } };
   return c;
 }
-
-export { deepClone };
 
 // ---------------------------------------------------------------------------------------- lookups
 
@@ -224,8 +222,6 @@ export function makeUnit(entry, side, index, extra = {}) {
   };
 }
 
-export { unitDef };
-
 // ------------------------------------------------------------------------------------- deployment
 
 /** Dark squares of a side's two deployment rows: { front: [...], back: [...] } (centre first). */
@@ -350,4 +346,3 @@ export function totalHpShare(s, side) {
   return max > 0 ? hp / max : 0;
 }
 
-export { STATUSES };

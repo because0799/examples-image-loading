@@ -13,7 +13,8 @@ export class Highlights {
   constructor(view) {
     this.view = view;
     this.under = view.layers.hlUnder;
-    this.add = view.layers.hlAdd;
+    this.add = view.layers.hlAdd; // board level: dots, dashes
+    this.top = view.layers.hlTop; // above the tokens: rings and reticles (hollow, never cover a face)
     this.pool = [];
     this.used = [];
     this.spec = null;
@@ -28,7 +29,7 @@ export class Highlights {
     s.alpha = 1;
     s.rotation = 0;
     s.visible = true;
-    s.blendMode = 'normal';
+    s.blendMode = 'inherit';
     s._kind = kind;
     s._phase = Math.random() * TAU;
     parent.addChild(s);
@@ -39,8 +40,8 @@ export class Highlights {
   _size(s, w, h = w) {
     const t = s.texture.orig;
     s.scale.set(w / (t.width || 1), h / (t.height || 1));
-    s._sx = s.scale.x;
-    s._sy = s.scale.y;
+    s.rvSx = s.scale.x;
+    s.rvSy = s.scale.y;
   }
 
   clear() {
@@ -88,20 +89,20 @@ export class Highlights {
       if (id === S.selected) continue;
       const t = v.token(id);
       if (!t || !t.alive) continue;
-      const s = this._s('glowRing', this.add, mix(t.sideColor, 0xffffff, 0.3), 'selectable');
+      const s = this._s('glowRing', this.top, mix(t.sideColor, 0xffffff, 0.3), 'selectable');
       s.position.set(t.x, t.y);
-      this._size(s, sq * 1.06);
+      this._size(s, sq * 1.36);
     }
     // selected hero: gold ring + rotating arcs + lift
     if (S.selected != null) {
       const t = v.token(S.selected);
       if (t && t.alive) {
-        const a = this._s('glowRing', this.add, HL.selected, 'selected');
+        const a = this._s('glowRing', this.top, HL.selected, 'selected');
         a.position.set(t.x, t.y);
-        this._size(a, sq * 1.2);
-        const b = this._s('selRing', this.add, HL.selected, 'spin');
+        this._size(a, sq * 1.5);
+        const b = this._s('selRing', this.top, HL.selected, 'spin');
         b.position.set(t.x, t.y);
-        this._size(b, sq * 1.08);
+        this._size(b, sq * 1.22);
         t.setScale(1.07);
       }
     }
@@ -126,9 +127,9 @@ export class Highlights {
           if (seenVictim.has(m) || !v.occupied(m)) continue;
           seenVictim.add(m);
           v.center(m, p);
-          const s = this._s('glowRing', this.add, HL.jump, 'victim');
+          const s = this._s('glowRing', this.top, HL.jump, 'victim');
           s.position.set(p.x, p.y);
-          this._size(s, sq * 1.14);
+          this._size(s, sq * 1.42);
         }
         this._dashes(a, b);
         if (!seenLand.has(b)) {
@@ -143,15 +144,15 @@ export class Highlights {
     // targets
     for (const q of S.targets || []) {
       v.center(q, p);
-      const s = this._s('reticle', this.add, HL.target, 'reticle');
+      const s = this._s('reticle', this.top, HL.target, 'reticle');
       s.position.set(p.x, p.y);
-      this._size(s, sq * 0.92);
+      this._size(s, sq * 0.96);
     }
     for (const q of S.allies || []) {
       v.center(q, p);
-      const s = this._s('reticle', this.add, HL.ally, 'reticle');
+      const s = this._s('reticle', this.top, HL.ally, 'reticle');
       s.position.set(p.x, p.y);
-      this._size(s, sq * 0.92);
+      this._size(s, sq * 0.96);
     }
   }
 
@@ -187,7 +188,7 @@ export class Highlights {
           const p = 0.5 + 0.5 * Math.sin(t * 4.2 + s._phase);
           s.alpha = s._kind === 'selectable' ? 0.45 + 0.35 * p : 0.7 + 0.3 * p;
           const k = 1 + 0.08 * p;
-          s.scale.set(s._sx * k, s._sy * k);
+          s.scale.set(s.rvSx * k, s.rvSy * k);
           break;
         }
         case 'selected':

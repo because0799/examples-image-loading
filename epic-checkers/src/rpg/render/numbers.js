@@ -299,19 +299,48 @@ export class FloatingNumbers {
     }
     const lbl = o.reaction && REACTION_FX[o.reaction] ? REACTION_FX[o.reaction].label[view.lang === 'en' ? 'en' : 'ru'] : o.crit ? word('crit', view.lang) : null;
     if (lbl) {
-      const tex = view.labelTexture(lbl, o.reaction ? REACTION_FX[o.reaction].colors : [0xffd23f, 0xff8a1f], Math.round(size * (o.reaction ? 0.62 : 0.5)));
+      const tex = view.labelTexture(lbl, o.reaction ? REACTION_FX[o.reaction].colors : [0xffd23f, 0xff8a1f], Math.round(Math.max(13, size * (o.reaction ? 0.86 : 0.52))));
       if (tex) {
         it.labelTex = tex;
         it.label.texture = tex;
         it.label.visible = true;
         it.label.scale.set(1);
-        it.label.position.set(0, -size * 0.52);
+        it.label.position.set(0, -size * 0.5);
         it.shake = o.reaction ? 1 : 0;
+        const lw = tex.fx ? tex.fx.textWidth : tex.width;
+        it.width = Math.max(it.width, lw);
       }
     }
+    it.h = size * (it.label.visible ? (o.reaction ? 2.05 : 1.75) : 1.05);
+    this._avoid(it, sq);
     it.root.position.set(it.x, it.y);
     this.live.push(it);
     return it;
+  }
+
+  /** Nudge a new number up (and sideways) until it no longer covers another target's number. */
+  _avoid(it, sq) {
+    const L = this.view.layout;
+    const hw = it.width / 2 + sq * 0.05;
+    if (L) it.x = Math.max(L.bx + hw, Math.min(L.bx + L.n * L.sq - hw, it.x));
+    for (let k = 0; k < 4; k++) {
+      let hit = null;
+      for (const o of this.live) {
+        if (o.dying || o.key === it.key) continue;
+        const ox = o.root.x;
+        const oy = o.root.y;
+        const ow = (o.width || sq) / 2 + hw;
+        const oh = ((o.h || sq * 0.5) + it.h) / 2;
+        if (Math.abs(ox - it.x) < ow && Math.abs(oy - it.y) < oh) {
+          hit = o;
+          break;
+        }
+      }
+      if (!hit) return;
+      const up = hit.root.y - ((hit.h || sq * 0.5) + it.h) / 2 - sq * 0.04;
+      // never push a number off the top of the board: go below the other one instead
+      it.y = L && up - it.h / 2 < L.by - sq * 0.2 ? hit.root.y + ((hit.h || sq * 0.5) + it.h) / 2 + sq * 0.04 : up;
+    }
   }
 
   _kill(it, ms = 160) {

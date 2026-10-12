@@ -267,9 +267,9 @@ test('earlier stars: a sample of C1–C5 effects', () => {
   s = duel([C('lucille', 4), 'vera'], ['zlata'], { a0: 'd4', a1: 'f6', b0: 'h8' });
   r = act(s, { type: 'skill', unit: 'a0', target: sq('f6') });
   assert.equal(U(r.state, 'a1').statuses.find((x) => x.id === 'inspire').value, 0.35);
-  // Nocturna C2: Moonfall Rift cooldown 2; C1: Double 45 %
+  // Nocturna C2: Moonfall Rift cooldown 2; C1: Double 30 %
   s = createBattle({ sides: { 1: [C('nocturna', 2)], [-1]: [C('zlata', 0)] }, seed: 1 });
-  assert.equal(s.wards.find((w) => w.special === 'decoy').hp, Math.floor(0.45 * U(s, 'a0').maxHp));
+  assert.equal(s.wards.find((w) => w.special === 'decoy').hp, Math.floor(0.3 * U(s, 'a0').maxHp));
   assert.equal(heroDef('nocturna', 2).skill.cooldown, 2);
   // Zlata C2: toss 4 squares, +20 energy
   s = duel([C('zlata', 2), 'shio'], ['mara', 'falk'], { a0: 'b2', a1: 'c3', b0: 'd4', b1: 'h2' });

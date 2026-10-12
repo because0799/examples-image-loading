@@ -39,7 +39,9 @@
 // Zone: { id ('z<n>'), kind, owner, side, affects, sqs, turns }
 // Events: see ./events.md.
 
-import { cloneState, deepClone, STATE_VERSION, unitById, totalHpShare } from './state.js';
+import { cloneState, deepClone, STATE_VERSION, unitById, totalHpShare, makeUnit, autoDeploy, deploySquares as sideDeploySquares } from './state.js';
+import { resolveStage, initialHoles } from './stage.js';
+import { parseSq } from './board.js';
 import { createBattle as create, applyAction as apply, applyActionInPlace, IllegalActionError } from './flow.js';
 import { legalActions as legal, unitActions as unitActs, activatableUnits, safestSquare } from './actions.js';
 import { unitStats as effStats } from './stats.js';
@@ -173,4 +175,44 @@ export function deserializeBattle(obj) {
 /** Convenience: the unit object by id. */
 export function getUnit(state, id) {
   return unitById(state, id);
+}
+
+function deployContext(stage) {
+  const st = resolveStage(stage);
+  return { holes: initialHoles(st), reserved: st && st.rule && st.rule.id === 'escort' ? [parseSq(st.rule.square)] : [] };
+}
+
+/**
+ * Legal deployment squares of a side (its two home rows, minus chasms / the caravan square of the
+ * stage): { front: [sq], back: [sq] }, centre squares first.
+ */
+export function deploymentSquares(side = 1, stage = null) {
+  return sideDeploySquares(deployContext(stage), side);
+}
+
+/**
+ * «Авто» formation for a squad (GDD §3.1): style 'auto' (player: Guardians / Blades / Shadows forward,
+ * Oracles behind a Guardian) or 'ai' (enemy: back row first). Entries with a valid `sq` keep it.
+ * Returns an array of squares parallel to `squad`.
+ */
+export function suggestDeployment(squad, { side = 1, stage = null, style = side === 1 ? 'auto' : 'ai' } = {}) {
+  const ctx = deployContext(stage);
+  const { front, back } = sideDeploySquares(ctx, side);
+  const legal = new Set([...front, ...back]);
+  const taken = new Set();
+  const out = squad.map((e) => {
+    const q = e.sq != null ? parseSq(e.sq) : -1;
+    if (q >= 0 && legal.has(q) && !taken.has(q)) {
+      taken.add(q);
+      return q;
+    }
+    return -1;
+  });
+  const restIdx = out.map((q, i) => (q < 0 ? i : -1)).filter((i) => i >= 0);
+  const units = restIdx.map((i) => makeUnit(squad[i], side, i));
+  const sqs = autoDeploy(ctx, units, side, style, taken);
+  restIdx.forEach((i, k) => {
+    out[i] = sqs[k];
+  });
+  return out;
 }

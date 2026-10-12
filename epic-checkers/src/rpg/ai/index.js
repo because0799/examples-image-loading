@@ -15,7 +15,7 @@
 //   boss   — hard with a wider beam (16) and reply weight 0.9 (used for campaign bosses)
 
 import { AI } from '../data/rules.js';
-import { cloneState, unitById, isDisabled } from '../battle/state.js';
+import { cloneState, unitById } from '../battle/state.js';
 import { applyActionInPlace } from '../battle/flow.js';
 import { moveOptions, pendingOptions } from '../battle/movement.js';
 import { actOptions, jumpOptions, activatableUnits, safestSquare } from '../battle/actions.js';
@@ -164,7 +164,10 @@ export function chooseAction(state, opts = {}) {
   let bestV = -Infinity;
   for (const p of beam) {
     const reply = replyScore(state, p);
-    const v = p.score - (L.replyWeight || 0.8) * reply;
+    // the reply already measures the exposure: keep only a quarter of the greedy danger penalty,
+    // and lean in as the round limit approaches
+    const rw = (L.replyWeight || 0.8) * (1 - 0.5 * (p.pressure || 0));
+    const v = p.score + 0.75 * (p.dangerPenalty || 0) - rw * reply;
     p.value = v;
     if (v > bestV) {
       bestV = v;

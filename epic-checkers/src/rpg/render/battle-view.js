@@ -42,13 +42,14 @@ import { Highlights } from './highlights.js';
 import { VFX } from './vfx.js';
 import { CutIn } from './cutin.js';
 import { playUltimate } from './ults.js';
+import { ABORT } from './abort.js';
 import { parseBeats, hitGroups, targetsOf, VoiceGate, isChainDamage } from './timeline.js';
 import {
   ELEMENT_FX, REACTION_FX, SIDE_COLORS, BUDGET, GOLD, boardTheme, elementFx, word, mix, css, shade, formatAmount,
 } from './theme.js';
 
 /** Thrown inside choreography when skip() / hide() cuts a cinematic short. */
-export const ABORT = Symbol('rpg-render-abort');
+export { ABORT };
 
 const DOT_LABELS = new Set(['burn', 'lava', 'eruption', 'zone', 'dot', 'collapse', 'regen', 'fireRain']);
 const BG_BY_CHAPTER = { 1: 'bg-dawn', 2: 'bg-ash', 3: 'bg-sky' };
@@ -180,8 +181,9 @@ export class BattleView {
     L.ground = mk('rpg-ground', L.unitsRoot);
     L.base = mk('rpg-base', L.unitsRoot);
     L.glow = mk('rpg-glow', L.unitsRoot);
+    L.hlTop = mk('rpg-hl-top', L.unitsRoot);
     L.top = mk('rpg-top', L.unitsRoot);
-    for (const c of [L.ground, L.glow, L.hlAdd, L.decalGlow, L.bgMotes, L.vfxUnder]) c.blendMode = 'add';
+    for (const c of [L.ground, L.glow, L.hlAdd, L.hlTop, L.decalGlow, L.bgMotes, L.vfxUnder]) c.blendMode = 'add';
     // vfx over units (world)
     L.vfxRoot = mk('rpg-vfx');
     L.vfxOverN = mk('rpg-vfx-over-n', L.vfxRoot);
@@ -643,6 +645,12 @@ export class BattleView {
     for (const u of state.units || []) {
       seen.add(u.id);
       let t = this.tokens.get(u.id);
+      if (t && (t.heroId !== u.heroId || t.side !== u.side || t.look !== (u.reflection ? 'reflection' : 'hero') || (u.rarity && t.rarity !== u.rarity))) {
+        // the id now names another heroine (a new battle reusing ids): rebuild the token
+        t.destroy();
+        this.tokens.delete(u.id);
+        t = null;
+      }
       if (!t) {
         t = new TokenView(this, u, HERO_BY_ID[u.heroId]);
         this.tokens.set(u.id, t);
@@ -671,6 +679,11 @@ export class BattleView {
     for (const w of state.wards || []) {
       wseen.add(w.id);
       let v = this.wards.get(w.id);
+      if (v && v.kind !== (w.kind || 'ward')) {
+        v.destroy();
+        this.wards.delete(w.id);
+        v = null;
+      }
       if (!v) {
         const owner = (state.units || []).find((u) => u.id === w.owner) || null;
         v = new WardView(this, w, owner);
@@ -710,8 +723,11 @@ export class BattleView {
       this._splash.set(heroId, hit);
       return hit;
     }
-    const img = await loadImage(this.assets.splash(heroId));
+    // never hold a cinematic hostage to the network / decoder: fall back after 700 ms
+    const img = await Promise.race([loadImage(this.assets.splash(heroId)), new Promise((r) => setTimeout(() => r(null), 700))]);
     if (!img) return null;
+    const again = this._splash.get(heroId);
+    if (again) return again;
     const rec = { tex: imageTexture(img, `rpg-splash:${heroId}`), w: img.naturalWidth || img.width, h: img.naturalHeight || img.height };
     this._splash.set(heroId, rec);
     while (this._splash.size > 2) {
@@ -901,9 +917,10 @@ export class BattleView {
       weight,
       size: sz,
       fill: [css(mix(a, 0xffffff, 0.7)), css(a), css(mix(a, b, 0.55)), css(b)],
-      stroke: { color: '#05020a', width: Math.max(2, sz * 0.13) },
-      glow: { color: css(a), blur: sz * 0.3, alpha: 0.85 },
-      shadow: { dx: sz * 0.03, dy: sz * 0.05, color: '#000000' },
+      // small lettering gets a thinner ink line, or kanji / Cyrillic fill up into blobs
+      stroke: { color: '#05020a', width: sz < 20 ? Math.max(1.1, sz * 0.085) : sz * 0.12 },
+      glow: { color: css(a), blur: sz * (sz < 20 ? 0.18 : 0.3), alpha: 0.85 },
+      shadow: sz < 20 ? undefined : { dx: sz * 0.03, dy: sz * 0.05, color: '#000000' },
       shine: 0.55,
       res,
     };
@@ -1104,13 +1121,15 @@ export class BattleView {
     for (const tok of this.tokens.values()) tok.update(t, rdt);
     for (const w of this.wards.values()) w.update(t, rdt);
     this.hl.update(rdt);
+    this.vx.update(gdt);
     this.numbers.update(rdt);
     this._updateMotes(rdt);
     this._updateDecals(rdt);
     // board ambience
     const ph = this.clock.realNow / 1000;
-    this.arenaGlow.alpha = 0.1 + 0.04 * Math.sin(ph * 0.8);
-    this.edgeGlow.alpha = 0.32 + 0.12 * Math.sin(ph * 2.1);
+    const gk = this.theme ? this.theme.glow : 0.08;
+    this.arenaGlow.alpha = gk * (1 + 0.35 * Math.sin(ph * 0.8));
+    this.edgeGlow.alpha = 0.2 + 0.08 * Math.sin(ph * 2.1);
     for (const p of this._previews) p.c.alpha = 0.82 + 0.18 * Math.sin(ph * 6);
     // gentle parallax of the arena art with the camera
     if (this._bgFit) {
@@ -1122,6 +1141,31 @@ export class BattleView {
       const cy = scr.height / 2;
       this.bgSprite.position.set(cx + (this._bgFit.x - cx) * z - cam.ox * 0.12 + cam.shakeX * 0.3, cy + (this._bgFit.y - cy) * z - cam.oy * 0.12 + cam.shakeY * 0.3);
     }
+  }
+
+  /** Debug / verification snapshot. */
+  stats() {
+    const count = (n) => {
+      let c = 1;
+      if (n && n.children) for (const k of n.children) c += count(k);
+      return c;
+    };
+    const L = this.layers || {};
+    const nodes = ['bgRoot', 'boardRoot', 'unitsRoot', 'vfxRoot', 'topRoot', 'screenRoot'].reduce((s, k) => s + (L[k] ? count(L[k]) : 0), 0);
+    return {
+      shown: this.shown,
+      busy: this._busy,
+      tokens: this.tokens.size,
+      wards: this.wards.size,
+      numbers: this.numbers ? this.numbers.count : 0,
+      vfx: this.vx ? this.vx.live.size : 0,
+      bits: this.vx ? this.vx.bits.live.length : 0,
+      tasks: this._tasks.size,
+      nodes,
+      sq: this.sqSize,
+      atlasCell: this.tokenAtlas ? this.tokenAtlas.cell : 0,
+      fx: this.fx && typeof this.fx.stats === 'function' ? this.fx.stats() : null,
+    };
   }
 
   // ===================================================================== playback
@@ -1205,8 +1249,11 @@ export class BattleView {
   }
 
   _finishCinematics(skipped) {
-    if (this.cutin) this.cutin.stop();
-    if (this.vx) this.vx.stopAll();
+    // a normal end lets name plates and lingering particles finish; a skip clears them at once
+    if (skipped) {
+      if (this.cutin) this.cutin.stop();
+      if (this.vx) this.vx.stopAll();
+    }
     this._undimNow();
     if (this.fx && skipped) this.fx.hideCombo();
     for (const t of this.tokens.values()) {
@@ -1771,8 +1818,8 @@ export class BattleView {
     this.buzz([30, 40, 50]);
     const p = this.vx.ko(t);
     const sq = this.sqSize;
-    if (this.fx && this.pref('kanji')) this.fxt(this.fx.kanji('撃破', t.x, t.y - sq * 0.25, { size: Math.round(sq * 1.05), color: elementFx(t.element).color, hold: readMs('撃破', 'kanji', this.settings) * 0.55 }));
-    this.floatLabel(word('ko', this.lang), t.x, t.y + sq * 0.45, { colors: [0xffffff, 0xff4d5e], size: sq * 0.34, rise: 0.15 });
+    if (this.fx && this.pref('kanji')) this.fxt(this.fx.kanji('撃破', t.x, t.y + sq * 0.05, { size: Math.round(sq * 0.82), color: elementFx(t.element).color, hold: readMs('撃破', 'kanji', this.settings) * 0.5, backdrop: 'burst' }));
+    this.floatLabel(word('ko', this.lang), t.x, t.y + sq * 0.62, { colors: [0xffffff, 0xff4d5e], size: sq * 0.3, rise: 0.1 });
     await this.wait(Math.min(BUDGET.ko, 420));
     await p;
     t.setAlive(false);

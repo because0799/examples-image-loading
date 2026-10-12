@@ -172,13 +172,14 @@ export function iridescent(t) {
 
 // ------------------------------------------------------------------------------------ sides / UI
 
-/** Default side tints (the classic EPIC energy colours; renderer.epicSideColor overrides them). */
+/** Default side tints (the classic EPIC energy colours; renderer.epicSideColor overrides them).
+ *  Shown as the token's outer band (the energy ring track) and the floor ring under it. */
 export const SIDE_COLORS = Object.freeze({ 1: 0x29e6ff, [-1]: 0xff2e63 });
 /** HP bar fills: allies green, enemies red (readable at a glance, GDD §17.9). */
 export const HP_COLORS = Object.freeze({ 1: 0x52eb8a, [-1]: 0xff4d5e });
 export const HP_TRAIL = 0xfff1d6;
 export const SHIELD_COLOR = 0xd8f2ff;
-export const ENERGY_COLOR = 0x6fe3ff;
+export const ENERGY_COLOR = 0xffe9a8;
 export const ENERGY_READY = 0xffd23f;
 export const HEAL_COLOR = 0x5cff9d;
 export const DRAIN_COLOR = 0xb27bff;
@@ -196,21 +197,21 @@ export const HL = Object.freeze({ move: 0x3ddc97, jump: 0xff4d4d, land: 0xffb547
 export const BOARD_THEMES = Object.freeze({
   'bg-dawn': {
     id: 'bg-dawn', arena: { x: 0.5, y: 0.56 },
-    light: [0xf3ead6, 0xe2d4b6], lightAlpha: 0.9, dark: [0x284b5e, 0x142a38], darkAlpha: 0.94,
-    frame: [0xf6efe0, 0xc9b48a, 0x8a6a3a], inlay: 0xd9a84a, gem: 0x6fd6ff, accent: 0xffd27a, rune: 0xffe2a0,
-    motes: { color: 0xffe6a0, kind: 'pollen', count: 14 }, vignette: 0x0a1020,
+    light: [0xd9cfb6, 0xb9ab8c], lightAlpha: 0.86, dark: [0x1f3a4e, 0x0d1a26], darkAlpha: 0.96,
+    frame: [0xfff3d6, 0xc9a45a, 0x3a2a14], inlay: 0xe8b85a, gem: 0x6fd6ff, accent: 0x9fe8ff, rune: 0xbff2ff,
+    motes: { color: 0xffe6a0, kind: 'pollen', count: 14 }, vignette: 0x0a1020, glow: 0.07,
   },
   'bg-ash': {
     id: 'bg-ash', arena: { x: 0.5, y: 0.54 },
-    light: [0x7a6c66, 0x5a4e4a], lightAlpha: 0.92, dark: [0x2a1414, 0x150a0b], darkAlpha: 0.95,
-    frame: [0x3a2a26, 0x1c1210, 0x0c0606], inlay: 0xff7a3a, gem: 0xff5b3a, accent: 0xff8a4a, rune: 0xffa060,
-    motes: { color: 0xff9a4a, kind: 'embers', count: 18 }, vignette: 0x100406,
+    light: [0x6e625e, 0x4e4442], lightAlpha: 0.9, dark: [0x2a1414, 0x120809], darkAlpha: 0.96,
+    frame: [0x8a6a5a, 0x3a2420, 0x0c0606], inlay: 0xff7a3a, gem: 0xff5b3a, accent: 0xff8a4a, rune: 0xffa060,
+    motes: { color: 0xff9a4a, kind: 'embers', count: 18 }, vignette: 0x100406, glow: 0.12,
   },
   'bg-sky': {
     id: 'bg-sky', arena: { x: 0.5, y: 0.55 },
-    light: [0xece9f8, 0xd2cdea], lightAlpha: 0.9, dark: [0x2a2266, 0x150f3a], darkAlpha: 0.94,
-    frame: [0xf2f0ff, 0xb9b2e0, 0x6a62a8], inlay: 0x9f8cff, gem: 0xffd23f, accent: 0xb9a8ff, rune: 0xd8ccff,
-    motes: { color: 0xd8d0ff, kind: 'stars', count: 16 }, vignette: 0x06041a,
+    light: [0xd6d2ec, 0xb2abd6], lightAlpha: 0.86, dark: [0x241c5c, 0x100b30], darkAlpha: 0.96,
+    frame: [0xfafaff, 0xa9a0e0, 0x2a2258], inlay: 0xb9a8ff, gem: 0xffd23f, accent: 0xb9a8ff, rune: 0xd8ccff,
+    motes: { color: 0xd8d0ff, kind: 'stars', count: 16 }, vignette: 0x06041a, glow: 0.1,
   },
 });
 

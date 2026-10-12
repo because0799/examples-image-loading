@@ -173,8 +173,8 @@ export class TokenView {
     fitW(this.shadowS, D * 1.05);
     this.shadowS.scale.y = this.shadowS.scale.x * 0.9;
     this.shadowS.y = R * 0.78;
-    fitW(this.groundS, D * 1.22);
-    this.groundS.y = R * 0.74;
+    fitW(this.groundS, D * 1.34);
+    this.groundS.y = R * 0.9;
     fitW(this.portrait, D);
     fitW(this.rarGlow, D * 1.55);
     fitW(this.sheen, D * 1.02);
@@ -221,6 +221,7 @@ export class TokenView {
   setSideColor(c) {
     this.sideColor = c != null ? c : SIDE_COLORS[this.side] || 0xffffff;
     this.groundS.tint = this.sideColor;
+    if (this.ringR) this._drawEnergy();
   }
 
   // ------------------------------------------------------------------ position
@@ -361,7 +362,7 @@ export class TokenView {
   _drawEnergy() {
     const k = Math.max(0, Math.min(1, this.energy / this.maxEnergy));
     const ready = k >= 0.999;
-    const key = `${Math.round(k * 200)}|${ready}|${this.ringR.toFixed(2)}`;
+    const key = `${Math.round(k * 200)}|${ready}|${this.ringR.toFixed(2)}|${this.sideColor}`;
     this.readyGlow.visible = ready && this.alive;
     if (key === this._energyKey) return;
     this._energyKey = key;
@@ -369,7 +370,9 @@ export class TokenView {
     const r = this.ringR;
     const w = this.ringW;
     g.clear();
-    g.circle(0, 0, r).stroke({ width: w, color: 0x05030a, alpha: 0.82 });
+    // the outer band = side tint (ally / enemy), the energy arc runs on top of it
+    g.circle(0, 0, r).stroke({ width: w + 1.6, color: 0x05030a, alpha: 0.9 });
+    g.circle(0, 0, r).stroke({ width: w, color: mix(this.sideColor != null ? this.sideColor : 0x888888, 0x000000, 0.42), alpha: 1 });
     if (k > 0.005) {
       const a0 = -Math.PI / 2;
       const a1 = a0 + TAU * k;
@@ -400,7 +403,7 @@ export class TokenView {
 
   /** seals: array of element ids (natural, celestial). */
   setSeals(seals) {
-    const els = (Array.isArray(seals) ? seals : seals ? [seals] : []).map((x) => (x && x.element) || x).filter((x) => x && STATUS_FX && ELEMENT_FX[x] && ELEMENT_FX[x].leavesSeal);
+    const els = (Array.isArray(seals) ? seals : seals ? [seals] : []).map((x) => (x && x.element) || x).filter((x) => x && ELEMENT_FX[x] && ELEMENT_FX[x].leavesSeal);
     const I = this.view.icons;
     this.seals.forEach((s, i) => {
       const el = els[i];

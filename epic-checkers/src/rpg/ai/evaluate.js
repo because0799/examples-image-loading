@@ -1,7 +1,7 @@
 // Greedy evaluation of a simulated activation (GDD §10.2), in "HP points".
 
 import { AI, ROLES, reactionFor, defenseFactor } from '../data/rules.js';
-import { unitById, wardById, hasStatus, isDisabled } from '../battle/state.js';
+import { unitById, wardById, hasStatus, isDisabled, totalHpShare } from '../battle/state.js';
 import { unitDef } from '../battle/defs.js';
 import { atkEff, defEff } from '../battle/stats.js';
 import { dist, rowsAdvanced, dirBetween } from '../battle/board.js';
@@ -95,12 +95,15 @@ function statusTurns(st) {
 export function evaluate(root, after, me, info, weights = {}) {
   // late-game pressure: the closer the round limit, the less the AI cares about exposure
   const pressure = Math.min(1, Math.max(0, (root.round - 0.4 * root.roundLimit) / (0.6 * root.roundLimit)));
-  const dangerW = (weights.danger != null ? weights.danger : W.danger) * (1 - 0.7 * pressure);
+  // the side behind on HP share loses the round-limit tiebreak: it has to take risks
+  const urgency = pressure > 0 && totalHpShare(root, me) + 0.02 < totalHpShare(root, -me) ? pressure : 0;
+  const dangerW = (weights.danger != null ? weights.danger : W.danger) * (1 - 0.7 * pressure) * (1 - 0.8 * urgency);
   if (after.result) {
     const w = after.result.winner;
-    return { score: w === me ? 1e6 : w === 0 ? -500 : -1e6, kos: 6, affected: 6, healed: 0, teamMissing: 0 };
+    return { score: w === me ? 1e6 : w === 0 ? -500 : -1e6, kos: 6, affected: 6, healed: 0, teamMissing: 0, dangerPenalty: 0, pressure: 0 };
   }
   let score = 0;
+  let dangerPenalty = 0;
   let kos = 0;
   let healed = 0;
   let teamMissing = 0;
@@ -237,7 +240,7 @@ export function evaluate(root, after, me, info, weights = {}) {
     const want = aa.role === 'ranger' ? 3 : aa.role === 'mystic' || aa.role === 'oracle' ? 2 : 1;
     const nb = nearest(root, ra);
     const na = nearest(after, aa);
-    if (nb > want) score += (5 + 15 * pressure) * (Math.min(nb, 9) - Math.max(want, Math.min(na, 9)));
+    if (nb > want) score += (5 + 15 * pressure + 40 * urgency) * (Math.min(nb, 9) - Math.max(want, Math.min(na, 9)));
     // Bulwark: a Guardian next to allies protects them (−15 % damage); others like standing next to one
     const adjAllies = (s, u) => after.units.filter((x) => x.alive && x !== u && x.side === u.side && x.sq >= 0 && dist(x.sq, u.sq) === 1);
     if (aa.role === 'guardian') {
@@ -249,13 +252,13 @@ export function evaluate(root, after, me, info, weights = {}) {
       if (g(after, aa) && !g(root, ra)) score += 0.15 * threatTo(after, aa);
     }
     const threat = threatTo(after, aa);
-    score -= dangerW * Math.min(threat, aa.hp + aa.shield);
-    if (threat >= aa.hp + aa.shield) score -= 0.25 * aa.maxHp;
+    dangerPenalty = dangerW * Math.min(threat, aa.hp + aa.shield) + (threat >= aa.hp + aa.shield ? 0.25 * aa.maxHp : 0);
+    score -= dangerPenalty;
     if (aa.role === 'oracle' || aa.role === 'mystic') {
       const near = after.units.some((x) => x.alive && x !== aa && x.side === aa.side && x.sq >= 0 && dist(x.sq, aa.sq) <= 2);
       if (!near) score -= W.isolationPenalty;
     }
   }
   if (after.act && after.act.unit && after.side === me && !after.act.done) score += 120; // extra activation pending
-  return { score, kos, affected: affected.size, healed, teamMissing };
+  return { score, kos, affected: affected.size, healed, teamMissing, dangerPenalty, pressure };
 }

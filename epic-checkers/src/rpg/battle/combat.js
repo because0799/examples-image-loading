@@ -2,16 +2,12 @@
 // statuses, seals, energy, KO, awakening, displacement, wards and zones. Every primitive mutates the
 // working state `ctx.s` and appends events to `ctx.E.ev`.
 
-import {
-  STATUSES, ELEMENTS, REACTIONS, reactionFor, elementMult, defenseFactor, ENERGY, AWAKEN, BOSS, BATTLE, CLEANSABLE, DISPELLABLE,
-} from '../data/rules.js';
+import { STATUSES, ELEMENTS, REACTIONS, reactionFor, elementMult, defenseFactor, ENERGY, AWAKEN, BOSS, BATTLE, CLEANSABLE, DISPELLABLE } from '../data/rules.js';
 import { unitDef } from './defs.js';
 import { nextRand } from './rng.js';
-import { stepSq, dist, dirBetween, rowOf, colOf, neighbors, DARK, homeRow } from './board.js';
-import { hasStatus, sealOf, pieceAt, playable, unitById, pieceById, nextId, isDisabled, homeSquares, nearestEmpty } from './state.js';
-import {
-  atkEff, defEff, statValue, critChance, critMult, dmgPct, damageTakenPct, healingReceivedPct, affinity, reactionPct, energyGainPct, overhealToShieldPct, healPct,
-} from './stats.js';
+import { stepSq, dist, dirBetween, rowOf, colOf, neighbors, DARK } from './board.js';
+import { hasStatus, sealOf, pieceAt, playable, unitById, nextId, homeSquares, nearestEmpty } from './state.js';
+import { atkEff, defEff, statValue, critChance, critMult, dmgPct, damageTakenPct, healingReceivedPct, affinity, reactionPct, energyGainPct, overhealToShieldPct, healPct } from './stats.js';
 import { fire, fireSide } from './triggers.js';
 import { runEffects, subCtx } from './effects.js';
 import { displaceImmune } from './movement.js';
@@ -21,17 +17,15 @@ export function emit(ctx, ev) {
   ctx.E.ev.push(ev);
 }
 
-function unitStats(ctx, u) {
+export function unitStats(ctx, u) {
   const st = ctx.s.stats.units;
   if (!st[u.id]) st[u.id] = { dmgDealt: 0, dmgTaken: 0, healed: 0, shielded: 0, kos: 0, reactions: 0, crits: 0, ults: 0, skills: 0, basics: 0, chains: 0, hops: 0, maxChain: 0, awakenings: 0, actions: 0 };
   return st[u.id];
 }
-export { unitStats };
 
-function sideStats(ctx, side) {
+export function sideStats(ctx, side) {
   return ctx.s.stats.sides[side];
 }
-export { sideStats };
 
 // ------------------------------------------------------------------------------------------ energy
 
@@ -334,7 +328,8 @@ export function dealDamage(ctx, src, tgt, spec) {
         base *= cm;
       }
       let bonus = 1 + dmgPct(s, src, env) + (spec.dmgBonus || 0) + (ctx.actionBonus || 0);
-      if (src.role === 'ranger' && act && !act.moved && ctx.kind !== 'trigger' && ctx.kind !== 'ward') bonus += 0.15;
+      // Steady Aim: +15 % when the Ranger did not move this activation (a jump-strike is movement)
+      if (src.role === 'ranger' && act && !act.moved && act.kind !== 'jump' && ctx.kind !== 'trigger' && ctx.kind !== 'ward' && ctx.kind !== 'jump') bonus += 0.15;
       base *= Math.max(0, bonus);
     }
     let taken = 1 + damageTakenPct(s, tgt, env);
@@ -670,8 +665,10 @@ export function awakenUnit(ctx, u, o = {}) {
   if (u.awakened && !full) return false;
   const was = u.awakened;
   u.awakened = true;
-  if (!hasStatus(u, 'crown')) u.statuses.push({ id: 'crown', turns: null, stacks: 1, source: u.id, seq: seqOf(ctx) });
+  const newCrown = !hasStatus(u, 'crown');
+  if (newCrown) u.statuses.push({ id: 'crown', turns: null, stacks: 1, source: u.id, seq: seqOf(ctx) });
   emit(ctx, { type: 'awaken', unit: u.id, sq: u.sq, full });
+  if (newCrown) emit(ctx, { type: 'status', target: u.id, status: 'crown', turns: null, stacks: 1, on: true, source: u.id });
   if (!was) {
     unitStats(ctx, u).awakenings += 1;
     const ss = sideStats(ctx, u.side);
@@ -993,4 +990,3 @@ export function revivePlace(s, side, near) {
   return nearestEmpty(s, near, homeSquares(s, side, 2));
 }
 
-export { isDisabled, homeRow, pieceById };

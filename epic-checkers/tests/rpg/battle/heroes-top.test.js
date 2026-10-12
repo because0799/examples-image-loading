@@ -2,7 +2,7 @@
 // description in heroes.js says.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { battle, only, place, turn, act, evs, own, U, sq, noCrits, setSeal, addStatus, dmgTo, unitActions, legalActions } from './helpers.js';
+import { battle, only, place, turn, act, evs, own, U, sq, noCrits, addStatus, dmgTo, unitActions } from './helpers.js';
 import { unitStats } from '../../../src/rpg/battle/index.js';
 import { critChance } from '../../../src/rpg/battle/stats.js';
 import { rowOf } from '../../../src/rpg/battle/board.js';
@@ -70,25 +70,23 @@ describe('Liora — Queen of the Celestial Board', () => {
 });
 
 describe('Nocturna — Empress of the Eclipse', () => {
-  it('skill Moonfall Rift: 130 % Umbra in radius 1 of a square within 3; the centre is Silenced', () => {
+  it('skill Moonfall Rift: 100 % Umbra in radius 1 of a square within 3; the centre is Silenced', () => {
     const s = noCrits(only(battle(['nocturna'], ['mara', 'shio', 'vera']), { a0: 'd4', b0: 'f6', b1: 'g7', b2: 'a7' }));
     const r = act(s, { type: 'skill', unit: 'a0', target: sq('f6') });
     assert.ok(dmgTo(r.events, 'b0') > 0 && dmgTo(r.events, 'b1') > 0 && dmgTo(r.events, 'b2') === 0);
     assert.ok(U(r.state, 'b0').statuses.some((x) => x.id === 'silence'));
     assert.ok(!U(r.state, 'b1').statuses.some((x) => x.id === 'silence'));
   });
-  it('passive Hunger of the Abyss: hits burn 10 energy; an enemy Ultimate gives her +20', () => {
+  it('passive Hunger of the Abyss: hits burn 5 energy; an enemy Ultimate gives her +20', () => {
     const s = noCrits(only(battle(['nocturna', 'vera'], ['shio', 'mara']), { a0: 'd4', a1: 'a1', b0: 'f6', b1: 'a7' }));
     const e0 = U(s, 'b0').energy;
     const r = act(s, { type: 'basic', unit: 'a0', target: sq('f6') });
-    assert.equal(U(r.state, 'b0').energy, e0 + 6 - 10);
+    assert.equal(U(r.state, 'b0').energy, e0 + 6 - 5);
     const t = full(turn(noCrits(only(battle(['nocturna', 'vera'], ['shio', 'mara']), { a0: 'd4', a1: 'a1', b0: 'f6', b1: 'a7' })), -1), 'b0');
-    const n0 = U(t, 'a0').energy;
     const r2 = act(t, { type: 'ult', unit: 'b0', target: sq('e5') });
     assert.ok(own(r2.events).some((e) => e.type === 'energy' && e.unit === 'a0' && e.reason === 'effect' && e.delta === 20));
-    void n0;
   });
-  it('ult Imperial Eclipse: every enemy takes 110 %, −20 energy and Blight 2', () => {
+  it('ult Imperial Eclipse: every enemy takes 90 %, −20 energy and Blight 2', () => {
     const s = noCrits(only(full(battle(['nocturna'], ['shio', 'mara', 'vera']), 'a0'), { a0: 'd4', b0: 'h8', b1: 'a7', b2: 'f2' }));
     const before = ['b0', 'b1', 'b2'].map((id) => U(s, id).energy);
     const r = act(s, { type: 'ult', unit: 'a0' });
@@ -98,11 +96,11 @@ describe('Nocturna — Empress of the Eclipse', () => {
       assert.ok(U(r.state, id).energy <= before[i] + 6 - 20, id);
     });
   });
-  it('quirk Dusk Double: a decoy (30 % HP) on her back row saves her once from a lethal hit', () => {
+  it('quirk Dusk Double: a decoy (20 % HP) on her back row saves her once from a lethal hit (returns at 30 %)', () => {
     const s = battle(['nocturna', 'vera'], ['shio', 'mara']);
     const decoy = s.wards.find((w) => w.special === 'decoy');
     assert.ok(decoy);
-    assert.equal(decoy.hp, Math.floor(0.3 * U(s, 'a0').maxHp));
+    assert.equal(decoy.hp, Math.floor(0.2 * U(s, 'a0').maxHp));
     assert.equal(rowOf(decoy.sq), 7);
     place(s, { a0: 'd4', a1: 'a1', b0: 'e5', b1: 'a7' });
     noCrits(s);
@@ -269,10 +267,8 @@ describe('Vermilia — Phoenix of the Final Move', () => {
   });
   it('quirk Diva: +10 energy when an ally casts an Ultimate', () => {
     const s = noCrits(only(full(battle(['vera', 'vermilia'], ['shio', 'mara']), 'a0'), { a0: 'd4', a1: 'a1', b0: 'e5', b1: 'a7' }));
-    const e0 = U(s, 'a1').energy;
     const r = act(s, { type: 'ult', unit: 'a0' });
     assert.equal(own(r.events).filter((e) => e.type === 'energy' && e.unit === 'a1').reduce((a, e) => a + e.delta, 0), 10);
-    void e0;
   });
 });
 
@@ -317,7 +313,5 @@ describe('Tsubame — Swallow of the Storm', () => {
   it('quirk Light as a Feather: glides over allies', () => {
     const s = only(battle(['tsubame', 'vera'], ['shio']), { a0: 'a1', a1: 'b2' });
     assert.ok(unitActions(s, 'a0').moves.includes(sq('c3')));
-    void legalActions;
-    void setSeal;
   });
 });

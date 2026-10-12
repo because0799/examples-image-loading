@@ -154,3 +154,32 @@ test('battleResult is null while the battle runs; stats count reactions, ults an
   const s = battle(['vera'], ['vera']);
   assert.equal(battleResult(s), null);
 });
+
+test('createBattle validates squads (1..6 known heroes)', () => {
+  assert.throws(() => createBattle({ sides: { 1: [], [-1]: [{ heroId: 'vera' }] } }), /1\.\.6/);
+  assert.throws(() => createBattle({ sides: { 1: Array(7).fill({ heroId: 'vera' }), [-1]: [{ heroId: 'vera' }] } }), /1\.\.6/);
+  assert.throws(() => createBattle({ sides: { 1: [{ heroId: 'nobody' }], [-1]: [{ heroId: 'vera' }] } }), /Unknown hero/);
+  const s = createBattle({ sides: { 1: [{ heroId: 'vera', level: 99, constellation: 9 }], [-1]: [{ heroId: 'vera', level: -3 }] } });
+  assert.equal(s.units[0].level, 30);
+  assert.equal(s.units[0].constellation, 6);
+  assert.equal(s.units[1].level, 1);
+});
+
+test('deploymentSquares / suggestDeployment for the deployment screen', async () => {
+  const { deploymentSquares, suggestDeployment } = await import('../../../src/rpg/battle/index.js');
+  const d = deploymentSquares(1);
+  assert.equal(d.front.length + d.back.length, 8);
+  assert.ok(d.front.every((q) => q >> 3 === 6) && d.back.every((q) => q >> 3 === 7));
+  const car = deploymentSquares(1, '2-5');
+  assert.equal(car.front.length + car.back.length, 7); // d2 is the caravan
+  const chasm = deploymentSquares(1, '2-4');
+  assert.ok([...chasm.front, ...chasm.back].every((q) => (q & 7) !== 0 && (q & 7) !== 7));
+  const squad = ['mashiro', 'vera', 'akane', 'maren', 'iskra', 'runa'].map((heroId) => ({ heroId, level: 5 }));
+  const sqs = suggestDeployment(squad);
+  assert.equal(new Set(sqs).size, 6);
+  assert.equal(sqs[1] >> 3, 6); // Guardian forward
+  assert.equal(sqs[3] >> 3, 7); // Ranger back
+  const s = createBattle({ sides: { 1: squad.map((e, i) => ({ ...e, sq: sqs[i] })), [-1]: [{ heroId: 'vera' }] } });
+  assert.deepEqual(s.units.filter((u) => u.side === 1).map((u) => u.sq), sqs);
+  assert.equal(suggestDeployment([{ heroId: 'vera', sq: 'a1' }, { heroId: 'shio' }])[0], sq('a1'));
+});

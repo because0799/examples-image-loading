@@ -5,7 +5,7 @@ import { unitDef } from './defs.js';
 import { neighbors, dist, dirBetween, stepSq } from './board.js';
 import { occupancy, hasStatus, isDisabled, unitById, playable, isEmptySq, pieceAt } from './state.js';
 import { basicRange } from './stats.js';
-import { enumeratePicks, matchPick, applyTaunt, hiddenFrom, abilityDamages } from './targeting.js';
+import { enumeratePicks, applyTaunt, hiddenFrom, abilityDamages } from './targeting.js';
 import { moveOptions, jumpChains, pendingOptions, displaceImmune } from './movement.js';
 import { adjacentLanding } from './effects.js';
 
@@ -361,4 +361,3 @@ export function safestSquare(s, u, squares, includeStay) {
   return best;
 }
 
-export { matchPick, pendingOptions, moveOptions };

@@ -242,6 +242,7 @@ export class CutIn {
     const outMs = compact ? 150 : 200;
     const flash = v.pref('flashes');
     await v.anim(ms, (e, k) => {
+      if (rec.disposed) return;
       const t = k * ms;
       const kin = clamp01(t / inMs);
       const ke = t > ms - outMs ? clamp01((t - (ms - outMs)) / outMs) : 0;
@@ -356,6 +357,7 @@ export class CutIn {
     const inMs = 220;
     const outMs = 230;
     await v.anim(ms, (e, k) => {
+      if (rec.disposed) return;
       const t = k * ms;
       const kin = clamp01(t / inMs);
       const ke = t > ms - outMs ? clamp01((t - (ms - outMs)) / outMs) : 0;
@@ -418,7 +420,9 @@ export class CutIn {
     const L = v.layout;
     const size = Math.round(Math.max(13, Math.min(22, L.sq * 0.4)));
     const tex = v.labelTexture(text, [0xffffff, E.color], size);
-    const jtex = jp ? v.labelTexture(jp, [mix(E.color, 0xffffff, 0.6), E.color], Math.round(size * 0.72)) : null;
+    // the plate is a quick read: Russian / English only (the JP name lives in the cut-in band)
+    const jtex = null;
+    void jp;
     if (!tex) return Promise.resolve(false);
     const root = new Container();
     const tw = (tex.fx ? tex.fx.textWidth : tex.width) + (jtex ? (jtex.fx ? jtex.fx.textWidth : jtex.width) + size * 0.6 : 0);
@@ -453,17 +457,20 @@ export class CutIn {
     const rec = { root, texs: [tex, jtex].filter(Boolean) };
     this.plates.add(rec);
     const dur = 180 + hold + 260;
-    return v.anim(dur, (e, k) => {
+    rec.anim = v.anim(dur, (e, k) => {
+      if (rec.disposed) return;
       const t = k * dur;
       const kin = clamp01(t / 180);
       root.alpha = t < dur - 260 ? kin : clamp01((dur - t) / 260);
       root.scale.set(0.9 + 0.1 * Ease.outBack(kin));
-    }, { realtime: true }).then(() => this._disposePlate(rec));
+    }, { realtime: true });
+    return rec.anim.then(() => this._disposePlate(rec));
   }
 
   _disposePlate(rec) {
     if (!rec || rec.disposed) return;
     rec.disposed = true;
+    if (rec.anim && typeof rec.anim.cancel === 'function') rec.anim.cancel();
     this.plates.delete(rec);
     for (const t of rec.texs) this.view.releaseText(t);
     rec.root.destroy({ children: true });

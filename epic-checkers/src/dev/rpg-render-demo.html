@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>rpg-render-demo — Валькирии доски: battle view lab</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #05030c; color: #ede8ff; overflow: hidden;
+    font-family: Oswald, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
+  #stage { position: fixed; inset: 0; overflow: hidden; }
+  #ui { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+  .hud-top, .hud-bot { position: absolute; left: 0; right: 0; background: linear-gradient(180deg, rgba(8,5,20,.88), rgba(8,5,20,.55));
+    border-bottom: 1px solid rgba(160,140,255,.25); display: flex; align-items: center; padding: 0 10px; gap: 8px; font-size: 13px; letter-spacing: .5px; }
+  .hud-top { top: 0; height: 56px; }
+  .hud-enemy { position: absolute; left: 0; right: 0; top: 56px; height: 52px; display: flex; gap: 6px; padding: 6px 10px; }
+  .hud-bot { bottom: 0; height: 196px; flex-direction: column; align-items: stretch; justify-content: flex-end; padding: 8px 10px 14px;
+    background: linear-gradient(0deg, rgba(8,5,20,.92), rgba(8,5,20,.5)); border-top: 1px solid rgba(160,140,255,.25); border-bottom: 0; }
+  .chip { flex: 1; height: 40px; border-radius: 10px; background: rgba(30,20,60,.75); border: 1px solid rgba(160,140,255,.25); }
+  .row { display: flex; gap: 6px; }
+  .act { flex: 1; height: 48px; border-radius: 12px; background: rgba(40,28,80,.85); border: 1px solid rgba(200,180,255,.3); display: grid; place-items: center; color: #d8d0ff; }
+  .pill { padding: 4px 10px; border-radius: 99px; background: rgba(40,28,80,.85); border: 1px solid rgba(200,180,255,.3); }
+  #board-slot { position: fixed; pointer-events: none; }
+  #panel { position: fixed; right: 6px; top: 62px; z-index: 20; display: flex; flex-wrap: wrap; gap: 4px; max-width: 60vw; justify-content: flex-end; }
+  #panel button { font: 500 11px Oswald, sans-serif; color: #ede8ff; background: #1b1238cc; border: 1px solid #3a2a6e; border-radius: 6px; padding: 4px 6px; cursor: pointer; }
+  body.nopanel #panel { display: none; }
+  body.nohud #ui { display: none; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="ui">
+  <div class="hud-top"><span class="pill">II</span><span class="pill">Раунд 5/30 · Ваш ход</span><span style="flex:1"></span><span class="pill">×1</span><span class="pill">Авто</span></div>
+  <div class="hud-enemy"><div class="chip"></div><div class="chip"></div><div class="chip"></div><div class="chip"></div><div class="chip"></div><div class="chip"></div></div>
+  <div class="hud-bot">
+    <div class="row" style="margin-bottom:8px"><div class="act">Атака</div><div class="act">Навык ⟳2</div><div class="act">Вспышка ⚡</div><div class="act">Ждать</div></div>
+    <div class="row"><div class="chip" style="height:52px"></div><div class="chip" style="height:52px"></div><div class="chip" style="height:52px"></div><div class="chip" style="height:52px"></div><div class="chip" style="height:52px"></div><div class="chip" style="height:52px"></div></div>
+  </div>
+</div>
+<div id="board-slot"></div>
+<div id="panel"></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 import { AWAKEN } from '../data/rules.js';
 import { unitDef } from './defs.js';
 import { DARK, stepSq, dist, rowOf, rowsAdvanced } from './board.js';
-import { occupancy, playable, hasStatus, unitById } from './state.js';
+import { occupancy, playable, hasStatus } from './state.js';
 import { glideBonus, chainBonus } from './stats.js';
 
 const MAX_CHAINS = 600;
@@ -253,4 +253,3 @@ function lexLess(a, b) {
   return false;
 }
 
-export { unitById };
