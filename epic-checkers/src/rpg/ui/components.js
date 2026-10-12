@@ -380,3 +380,49 @@ export function starfield(seed = 3, n = 40, cls = '') {
   }
   return el;
 }
+
+/**
+ * «Кого заменить?» — the squad is full and the player wants `newId` in it: a sheet with the current
+ * members; resolves the id to replace, or null when closed.
+ */
+export function pickReplacement(ui, squadIds, newId, { levelOf = null } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      resolve(v);
+    };
+    const hero = getHero(newId);
+    ui.openSheet(
+      (close) =>
+        h(
+          'div.rv-replace',
+          h('p.rv-replace__hint', rt('squad.replaceHint', { name: hero ? L(hero.name) : '' })),
+          h(
+            'div.rv-replace__list',
+            ...squadIds.map((id) => {
+              const x = getHero(id);
+              return h(
+                'button.rv-replace__item',
+                {
+                  type: 'button',
+                  dataset: { hero: id },
+                  on: {
+                    click: ui.tap(() => {
+                      finish(id);
+                      close();
+                    }),
+                  },
+                },
+                heroToken(ui, id, { size: 56 }),
+                h('span.rv-replace__name', { 'data-fit': '9' }, x ? L(x.name) : id),
+                levelOf ? h('span.rv-replace__lvl', rt('common.level', { n: levelOf(id) })) : null,
+              );
+            }),
+          ),
+        ),
+      { title: rt('squad.replaceTitle'), kanji: '交代', cls: 'rv-sheet--replace', onClose: () => finish(null) },
+    );
+  });
+}

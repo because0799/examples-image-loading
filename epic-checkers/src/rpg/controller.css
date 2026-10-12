@@ -1,0 +1,37 @@
+/* «Валькирии доски» — integration bits (src/rpg/controller.js): the first-run welcome sheet. */
+.rv-welcome {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 6px;
+}
+.rv-welcome__tokens {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+.rv-welcome__p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.38;
+  color: var(--rv-text, #f7f3ff);
+}
+.rv-welcome__p:first-of-type {
+  color: var(--rv-gold, #ffdb8f);
+}
+.rv-welcome__btns {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+.rv-welcome__btns > * {
+  flex: 1 1 0;
+}
+
+/* targeting hints (tone 'hint') leave the board as soon as an action / cinematic plays */
+.rv-screen--battle.is-busy .rv-bt__toast.is-hint,
+.rv-screen--battle.is-cinematic .rv-bt__toast {
+  display: none;
+}

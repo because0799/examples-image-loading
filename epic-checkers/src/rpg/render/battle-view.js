@@ -246,6 +246,7 @@ export class BattleView {
   hide() {
     if (!this.shown) return;
     this._abortPlay();
+    this._clearTransient();
     const r = this.renderer;
     const L = this.layers;
     this.clock.remove(this._tick);
@@ -643,6 +644,20 @@ export class BattleView {
       if (boardTheme(bg).id !== this.bgId) this._setBg(bg);
     }
     if (!this.layout) this._relayout(true);
+    // integration fix: the portrait atlas (4×5 cells) only grows, so after a few battles with
+    // different heroines it was full and new tokens came out blank (Texture.WHITE). A state that
+    // needs portraits the atlas has no room for starts a fresh atlas (a new battle: old tokens go).
+    const atlas = this.tokenAtlas;
+    if (atlas && atlas.cells) {
+      const need = new Set((state.units || []).map((u) => `${u.heroId}|${u.reflection ? 'reflection' : 'hero'}`));
+      let missing = 0;
+      for (const k of need) if (!atlas.cells.has(k)) missing++;
+      if (missing && atlas.cells.size + missing > atlas.cols * atlas.rows) {
+        for (const t of this.tokens.values()) t.destroy();
+        this.tokens.clear();
+        this._rebuildTokenAtlas(atlas.cell);
+      }
+    }
     const seen = new Set();
     for (const u of state.units || []) {
       seen.add(u.id);
@@ -1303,6 +1318,35 @@ export class BattleView {
 
   _abortPlay() {
     if (this._busy) this.skip();
+  }
+
+  /**
+   * Drops the visuals that outlive a cinematic (lingering VFX / particles, name plates, damage
+   * numbers, KO and reaction labels). Called when the view leaves: they were frozen with the
+   * occluded renderer and came back over the next battle (playtest).
+   */
+  _clearTransient() {
+    for (const p of Array.from(this._fxTracked)) {
+      try {
+        p.stop();
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    this._fxTracked.clear();
+    if (this.vx) this.vx.stopAll();
+    if (this.cutin) this.cutin.stop();
+    if (this.numbers) this.numbers.clear();
+    const lab = this.layers && this.layers.labels;
+    if (lab) for (const c of lab.children) c.visible = false;
+    if (this.fx) {
+      try {
+        this.fx.hideCombo();
+        if (typeof this.fx.clear === 'function') this.fx.clear();
+      } catch (e) {
+        /* ignore */
+      }
+    }
   }
 
   _finishCinematics(skipped) {

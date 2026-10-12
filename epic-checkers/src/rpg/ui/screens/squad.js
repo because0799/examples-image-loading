@@ -1,7 +1,7 @@
 // «Отряд» (GDD §17.5): 6 slots, squad power, element-reaction and role-coverage hints, the owned
 // heroes to pick from, «Авто» and «Сохранить» (emits 'set-squad').
 
-import { h, rvHeader, rvButton, heroCard, rvSection, roleBadge, heroToken } from '../components.js';
+import { h, rvHeader, rvButton, heroCard, rvSection, roleBadge, heroToken, pickReplacement } from '../components.js';
 import { rvIcon } from '../icons.js';
 import { rt, L, fmt } from '../i18n.js';
 import {
@@ -64,7 +64,13 @@ export function createSquad(ui, params = {}) {
     const i = ids.indexOf(id);
     if (i >= 0) ids.splice(i, 1);
     else if (ids.length >= SQUAD_SIZE) {
-      ui.toast(rt('squad.full'));
+      // full: ask who sits out instead of a dead-end toast
+      pickReplacement(ui, ids.slice(), id, { levelOf: (x) => heroLevel(ui.profile, x) }).then((out) => {
+        const j = out ? ids.indexOf(out) : -1;
+        if (j < 0 || ids.includes(id)) return;
+        ids[j] = id;
+        render();
+      });
       return;
     } else ids.push(id);
     render();

@@ -702,6 +702,12 @@ export const AI = {
 // Russian draughts). Enemy squads are «Отражения» (grey reflections of roster heroes, C0, art
 // tinted by a shader). `elite` = a Legendary/Mythic reflection with normal rules; `miniBoss` =
 // BOSS rules with hpMult but no extra activation; `boss` = full BOSS rules.
+// Boss tuning (playtest 1.2.0): with the GDD's HP ×5–6 at full ATK every boss won 100 % of simulated
+// fights even against a squad 10 levels above the stage (the boss acts every turn + extra activations).
+// Now: hpMult 3.5 / 2.5 / 3.5, `atkMult` (boss ATK × 0.75 / 0.45 / 0.6), 3-B escorts level 25, bosses never
+// awaken by reaching the back row and get no on-kill extra activations (battle/combat.js, effects.js).
+// Measured with the AI playing the player's side: 1-B ≈ 43 % (starter squad L10, normal), 2-B ≈ 38 %
+// (Epic squad L20, hard), 3-B ≈ 44 % (Liora + Epics L30, hard) — a human who plans does better.
 // Rewards: first clear STAGE 80 / BOSS 400 crystals + XP scrolls (ECONOMY.firstClear), ★★★ chest 60.
 // Stars: ★ win · ★★ win with ≤1 hero KO'd · ★★★ win with no KO within `threeStarRounds`.
 export const CAMPAIGN = [
@@ -726,7 +732,7 @@ export const CAMPAIGN = [
       { id: '1-8', name: { ru: 'Предрассветный бой', en: 'Battle Before Dawn' }, level: 8, ai: 'normal', enemies: ['koyuki', 'kaede', 'shio', 'torvald', 'mashiro', 'iskra'] },
       {
         id: '1-B', boss: true, name: { ru: 'Серая Ласточка', en: 'The Grey Swallow' }, level: 10, ai: 'normal',
-        bossHero: 'tsubame', hpMult: 5, escorts: [['kaede', 8], ['sirin', 8], ['vera', 8]], roundLimit: 30, threeStarRounds: 20,
+        bossHero: 'tsubame', hpMult: 3.5, atkMult: 0.75, escorts: [['kaede', 8], ['sirin', 8], ['vera', 8]], roundLimit: 30, threeStarRounds: 20,
         mechanics: [
           { id: 'featherTrail', desc: { ru: 'Клетки, по которым скользит босс, на 2 хода становятся «перьями»: встал — Замедлен.', en: 'Squares the boss glides through become "feathers" for 2 turns: ending there Slows.' } },
           { id: 'galeEscape', desc: { ru: 'Один раз при 50% HP: Сокрытие на 1 ход и прыжок на свой задний ряд.', en: 'Once at 50% HP: Veiled for 1 turn and a leap to her own back row.' } },
@@ -756,7 +762,7 @@ export const CAMPAIGN = [
       { id: '2-8', name: { ru: 'Стражи кратера', en: 'Crater Wardens' }, level: 18, ai: 'hard', enemies: ['zlata', 'fuyuka', 'lucille', 'karasu', 'kaede', 'volta'], elite: ['fuyuka'] },
       {
         id: '2-B', boss: true, name: { ru: 'Пепельный Феникс', en: 'The Ashen Phoenix' }, level: 20, ai: 'hard',
-        bossHero: 'vermilia', hpMult: 5, escorts: [['akane', 18], ['torvald', 18], ['lucille', 18], ['volta', 18]], roundLimit: 30, threeStarRounds: 20,
+        bossHero: 'vermilia', hpMult: 2.5, atkMult: 0.45, escorts: [['akane', 18], ['torvald', 18], ['lucille', 18], ['volta', 18]], roundLimit: 30, threeStarRounds: 20,
         mechanics: [
           { id: 'bossEgg', desc: { ru: 'При 0 HP становится Яйцом (20% макс. HP босса); не разбили за 2 хода — возрождается с 50% HP.', en: 'At 0 HP she becomes an Egg (20% of boss max HP); if not broken within 2 turns she returns at 50% HP.' } },
           { id: 'fireRain', every: 3, mult: 1.2, desc: { ru: 'Каждый 3-й раунд — Огненный дождь: 3 круга радиуса 1 (подсвечены за ход) по 120% ATK босса Пламенем.', en: 'Every 3rd round — Fire Rain: 3 radius-1 circles (shown a turn earlier), 120% boss ATK Flame each.' } },
@@ -788,8 +794,8 @@ export const CAMPAIGN = [
       { id: '3-8', name: { ru: 'Перед последним ходом', en: 'Before the Final Move' }, level: 28, ai: 'hard', enemies: 'mirror', rule: { id: 'mirror' } },
       {
         id: '3-B', boss: true, name: { ru: 'Безликая Дамка', en: 'The Faceless Queen' }, level: 30, ai: 'hard',
-        bossHero: 'nocturna', bossRules: [{ rule: 'startCrowned', params: { lossThresholdPct: 0.1 } }], hpMult: 6,
-        escorts: [['karasu', 28], ['fuyuka', 28], ['lucille', 28], ['reika', 28], ['tsubame', 28]], roundLimit: 30, threeStarRounds: 22,
+        bossHero: 'nocturna', bossRules: [{ rule: 'startCrowned', params: { lossThresholdPct: 0.1 } }], hpMult: 3.5, atkMult: 0.6,
+        escorts: [['karasu', 25], ['fuyuka', 25], ['lucille', 25], ['reika', 25], ['tsubame', 25]], roundLimit: 30, threeStarRounds: 22,
         collapseShift: -2, // the chapter collapse schedule starts 2 rounds earlier: rounds 14 / 16 / 18
         mechanics: [
           { id: 'phase1', hpAbove: 0.6, desc: { ru: 'Вечное затмение: лечение игрока −30%.', en: 'Endless Eclipse: player healing −30%.' } },

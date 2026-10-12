@@ -93,3 +93,71 @@ ui.playSummon(results) -> Promise  // pull animation by rarity (Mythic special),
 ui.showResults({ result, rewards }) -> Promise<'again'|'next'|'hub'>
 ui.boardSlotRect() -> DOMRect;  ui.handleBack() -> boolean
 ```
+
+## Integration (owner: integration) — done in 1.2.0
+```js
+// src/rpg/index.js → src/rpg/controller.js
+const rpg = new RpgController({ root /* #ui */, classicUi, renderer, fx, audio, native, settings, perf, opts: { debug, fast, autoSkip } });
+rpg.open({ screen? });  rpg.close();  rpg.visible;  rpg.handleBack();  rpg.onAppPause(bool);  rpg.applySettings(s);
+rpg.snapshot();  rpg.battle   // tests / debug (window.__app.rpg with ?debug=1)
+```
+- **Entry:** the classic menu tile «Валькирии доски» (`src/ui/screens/menu.js`, key-art thumbnail, «Новое!» badge)
+  emits `ui.emit('open-rpg')`; `main.js` opens the hub. `?screen=rpg[&rpgScreen=…]` opens it directly.
+  RpgUI mounts inside `#ui` (the classic screens are `display: none` while it is up); «К шашкам» / Android back on
+  the hub → `rpg.close()` → the classic menu. While a non-battle RPG screen covers the canvas the renderer is
+  `setOccluded(true)`.
+- **Session:** `meta.loadProfile` + `claimDaily` on open (first run: starter squad, 3 200 ✦, 5 scrolls + a welcome
+  sheet; `completeFirstRun`), `saveProfile` after every mutation (summon is saved *before* its animation).
+- **Battles:** campaign = `meta.campaignSetup` (boss stages with AI 'hard' use the AI's 'boss' level), training /
+  duel = the RpgUI payload (training enemies marked `reflection`, duel first move = engine coin toss).
+  `createBattle({ sides, mode, stage, seed, first })`; BattleView is shown on the app's Renderer (world layer made
+  visible, classic layers restored by `view.hide()`); HUD ↔ view: `board-rect` → `setBoardRect`, the free area
+  between the HUD panels → `setSafeRect` (full screen during Ultimates), `onCinematic` → `hud.setCinematic`.
+- **Turn loop:** step-level, exactly the engine's structure: select → `unitActions` → `view.highlight` (+
+  `previewAction` forecast labels via `view.preview`) → move / basic / jump chain (landing squares tapped hop by
+  hop; a tap on the last landing stops) / skill / ult / quirk (self-centred: area + forecast, tap the board to
+  confirm; `single`: tap; line / row / cross / radius / diagonals: tap → forecast → tap again; `lines`: one tap per
+  direction; `square`: pick squares, tap a picked one to confirm) / Wait / End → `applyAction` →
+  `view.play(events, { state })` → `hud.update` + `hud.log`. Pending relocations and extra activations keep the
+  heroine selected. Enemy (and «Авто») turns: `RpgAIClient` on a Web Worker built from `src/rpg/ai/worker.js`
+  (injected by `tools/build-web.mjs` as `__RPG_AI_WORKER_SRC__`), 6 s watchdog → in-thread fallback.
+  «Авто» is offered in campaign and training from the first battle (constant `AUTO_ANYWHERE`; GDD §16 wanted it
+  after a manual clear), never in duels. Duel: the board / HUD turn to the player to move, «Передай телефон»
+  between turns when enabled.
+- **End:** `battleResult` → `meta.applyBattleResult({ stageId, mode, result, squad, state, events, enemyLevel,
+  battleId: seed })` → profile saved at once → `ui.showResults({ …, mvp })` (MVP victory line by the results
+  screen) → next (stage sheet of the next unlocked stage) / again / squad / hub. Music: `epic` in battle (intensity
+  from HP shares, ready Ultimates, bosses), `victory` / `defeat` on results, `menu` elsewhere.
+- **Mid-battle save:** `localStorage['ec.rpg.battle.v1'] = { v: 1, setup, state: serializeBattle(state), auto,
+  speed }` after every completed action and on app pause; opening the hub offers «Продолжить» / «Бросить»;
+  cleared when the battle ends (rewards were already applied) or is abandoned.
+- **Settings** (shared live object, persisted by `src/ui/storage.js`): `rpgVoice` (true), `voiceVolume` (0.9),
+  `rpgUltCinematic` ('full' | 'short' | 'first'), `rpgDamageNumbers` (true) — controls in the RPG «Валькирии»
+  sheet (hub gear / battle pause).
+- **e2e:** `tests/e2e/rpg-flow.mjs`, `rpg-play.mjs`, `rpg-mechanics.mjs` (helpers `rpg-lib.mjs`), in `run-all.mjs`.
+
+## Playtest pass (1.2.0) — what changed after playing the build like a new player
+- **First battles teach the game.** 1-1 runs a coach bubble (`hud.coach(text, { onOff })`, driven by
+  `RpgController._coachUpdate()` from the current selection / phase / energy / enemy turn; ✕ = no more tips).
+  Stages with a `tutorial` id (1-2 reactions, 1-3 chains, 1-4 taunt, 1-5 awakening, 3-2 portals) open a short card
+  (`src/rpg/ui/tutorial.js`, `ui.openTutorial(id)`) before the first turn. Seen flags: `profile.flags['tut.<id>']`.
+  The pause menu has «Как играть» (`ui.openHowTo()`).
+- **Why can't I?** A tap on a disabled action button explains it (cooldown turns, energy x/y, no targets, already
+  moved, not your turn) together with the ability text; while a skill / Ultimate / quirk is being targeted the unit
+  card shows what it does.
+- **Full squad:** adding a heroine opens «Кого заменить?» (`pickReplacement` in `ui/components.js`) instead of a toast.
+- **After 2 losses in a row** on a campaign stage the results screen shows `meta.stageAdvice` (power vs recommended,
+  counter / same elements) and a «Тренировка на ур. N» button (GDD §14.4).
+- **Bosses were unbeatable** (0 % in simulations, even 10 levels over the stage): a turn-1 flying jump onto the back
+  row crowned the boss (heal, +50 energy, flight, Ultimate on turn 2), on-kill extra activations stacked on the
+  boss's own extra activation, and HP ×5–6 came at full ATK. Now bosses never crown themselves by moving and get no
+  on-kill extra activations (`battle/combat.js landed`, `battle/effects.js extraActivation`), and stages carry
+  `atkMult` next to `hpMult` (1-B 3.5 / 0.75, 2-B 2.5 / 0.45, 3-B 3.5 / 0.6, 3-B escorts level 25). See the note
+  above `CAMPAIGN` in `data/rules.js` for the measured win rates.
+- **Shader warm-up:** the first Ultimate stalled a frame for up to 1 s while Pixi compiled the particle / FX filter
+  programs. `render/warmup.js warmShaders()` compiles them in 60 ms slices ~1 s after the hub opens.
+- Battle log lines no longer squeeze into empty pills on short lanes, and hide during cinematics; the last blow's
+  numbers / KO labels / VFX are cleared when the view hides (they used to reappear at the next battle start); the
+  stage sheet's «В бой!» sticks to the bottom of the sheet; ability areas are drawn at 58 % instead of 32 %.
+- **Adaptive quality** ('auto') now also measures RPG battles (`main.js` perf `isActive`: an unpaused RPG battle on the
+  battle screen counts like a classic game), so a slow phone steps high → medium → low during RPG fights too.

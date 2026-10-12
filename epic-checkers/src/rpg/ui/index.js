@@ -67,6 +67,7 @@ import { createDuel } from './screens/duel.js';
 import { createResults } from './screens/results.js';
 import { buildSettingsSheet } from './screens/settings.js';
 import { createBattleScreen } from './hud.js';
+import { openTutorialCard, openHowTo } from './tutorial.js';
 import { playSummonAnimation } from './summon-anim.js';
 
 export { describeEvents } from './battle-log.js';
@@ -457,6 +458,7 @@ export class RpgUI {
         h(
           'div.rv-dlg__btns',
           rvButton(this, { label: rt('battle.resume'), icon: 'play', kind: 'gold', size: 'md', onClick: resume }),
+          rvButton(this, { label: rt('tut.howTo'), sub: rt('tut.howToSub'), icon: 'info', kind: 'glass', size: 'md', cls: 'rv-pause__howto', onClick: () => openHowTo(this) }),
           rvButton(this, { label: rt('settings.title'), sub: rt('settings.sub'), icon: 'settings', kind: 'glass', size: 'md', onClick: () => this.openSettings() }),
           rvButton(this, {
             label: rt('battle.surrender'),
@@ -476,6 +478,16 @@ export class RpgUI {
       );
     const entry = this._pushOverlay('pause', build(), { onBack: resume, backdropClose: true });
     entry.rebuild = () => entry.setContent(build());
+  }
+
+  /** Stage tutorial card (tutorial.js); resolves when closed. */
+  openTutorial(id) {
+    return openTutorialCard(this, id);
+  }
+
+  /** «Как играть» rules sheet. */
+  openHowTo() {
+    return openHowTo(this);
   }
 
   get paused() {

@@ -169,7 +169,7 @@ export function nextId(s, prefix) {
 
 /**
  * Create a unit object for a squad entry.
- * entry = { heroId, level=1, constellation=0, sq?, boss?, miniBoss?, hpMult?, reflection?, variant? }
+ * entry = { heroId, level=1, constellation=0, sq?, boss?, miniBoss?, hpMult?, atkMult?, reflection?, variant? }
  */
 export function makeUnit(entry, side, index, extra = {}) {
   const hero = HERO_BY_ID[entry.heroId];
@@ -195,7 +195,8 @@ export function makeUnit(entry, side, index, extra = {}) {
     rarity: def.rarity,
     hp: maxHp,
     maxHp,
-    atk: st.atk,
+    // bosses may hit softer than their hero sheet (stage atkMult, rules.js CAMPAIGN): HP ×N alone made them unbeatable
+    atk: Math.max(1, Math.floor(st.atk * (extra.atkMult || 1))),
     def: st.def,
     crit: st.crit,
     aff: st.aff,

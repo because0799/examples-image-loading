@@ -82,7 +82,8 @@ export class Highlights {
       const s = this._s('square', this.under, HL.area, 'area');
       s.position.set(p.x, p.y);
       this._size(s, sq * 0.96);
-      s.alpha = 0.32;
+      // 0.32 vanished on the dark tiles (playtest): the area must read at a glance
+      s.alpha = 0.58;
     }
     // selectable heroes: a soft ring under the token in the side colour
     for (const id of S.selectable || []) {

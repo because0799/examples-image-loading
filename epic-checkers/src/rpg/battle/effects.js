@@ -82,6 +82,9 @@ function runOp(ctx, eff) {
       return;
     }
     case 'extraActivation':
+      // a campaign boss already acts twice every 3rd turn (BOSS.extraActivationEvery): on-kill extra
+      // activations (Tsubame's Updraft…) on top of it snowballed a whole squad away in one turn
+      if (c.boss && !c.boss.mini) return;
       if (s.act && s.side === c.side && c.alive) {
         s.act.extraQueue.push(c.id);
         emit(ctx, { type: 'extraActivation', unit: c.id });

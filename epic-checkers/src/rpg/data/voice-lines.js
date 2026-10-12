@@ -185,7 +185,7 @@ export const VOICE_LINES = {
       summon: { jp: '茜、推参!一歩も退かないからね!', tts: 'あかね、すいさん!いっぽもひかないからね!', ru: 'Аканэ прибыла! Ни шагу назад, так и знай!', en: "Akane, here to fight! I won't take a single step back!" },
       skill: { jp: '緋の三日月、斬り裂け!', tts: 'ひのみかづき、きりさけ!', ru: 'Алый полумесяц, рассеки!', en: 'Scarlet crescent, cleave!' },
       ultimate: { jp: '昇れ、緋色の太陽──!', tts: 'のぼれ、ひいろのたいよう──!', ru: 'Восходи, алое солнце!', en: 'Rise, scarlet sun!' },
-      victory: { jp: 'よっしゃー!前に進んだ分だけ強くなる!', ru: 'Йес! Каждый шаг вперёд делает меня сильнее!', en: 'Yes! Every step forward makes me stronger!' },
+      victory: { jp: 'よっしゃー!前に進んだ分だけ強くなる!', ru: 'Есть! Каждый шаг вперёд делает меня сильнее!', en: 'Yes! Every step forward makes me stronger!' },
     },
   },
   volta: {

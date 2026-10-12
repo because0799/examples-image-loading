@@ -40,9 +40,11 @@ const GDD = {
   '3-6': [26, 'hard', 'fuyuka^3 koyuki mashiro mizuha zlata vera'],
   '3-7': [27, 'hard', 'vermilia^3 akane torvald lucille kaede reika'],
   '3-8': [28, 'hard', 'mirror'],
-  '3-B': [30, 'hard', 'nocturna! karasu:28 fuyuka:28 lucille:28 reika:28 tsubame:28'],
+  // 3-B escorts lowered from the GDD's 28 to 25 in the 1.2.0 boss balance pass (rules.js CAMPAIGN note)
+  '3-B': [30, 'hard', 'nocturna! karasu:25 fuyuka:25 lucille:25 reika:25 tsubame:25'],
 };
-const BOSS_HP = { '1-B': 5, '2-B': 5, '3-B': 6 };
+// GDD §15 had HP ×5 / ×5 / ×6; the 1.2.0 balance pass (rules.js CAMPAIGN note) uses these
+const BOSS_HP = { '1-B': 3.5, '2-B': 2.5, '3-B': 3.5 };
 
 function win(p, stageId, { lost = 0, rounds = 10 } = {}) {
   return applyBattleResult(p, { stageId, mode: 'campaign', result: { winner: 1, rounds }, stats: { lost }, now: NOW });

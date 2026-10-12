@@ -2125,6 +2125,16 @@
   grid-template-columns: 1fr 1.25fr;
   gap: 10px;
   margin-top: 16px;
+  /* «В бой!» always in reach: the buttons stick to the bottom of the scrolling sheet
+     (into the body's bottom padding), over a fade of the sheet colour */
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-left: -18px;
+  margin-right: -18px;
+  margin-bottom: calc(-1 * (var(--sab, 0px) + 18px));
+  padding: 14px 18px calc(var(--sab, 0px) + 14px);
+  background: linear-gradient(180deg, rgba(11, 8, 38, 0) 0%, rgba(11, 8, 38, 0.92) 26%, #0b0826 60%);
 }
 
 /* ================================================================= TRAINING / DUEL */
@@ -2704,4 +2714,92 @@
 }
 .rv-settings__seg .rv-seg__label {
   white-space: nowrap;
+}
+
+/* ================================================================= «Кого заменить?» (full squad) */
+.rv-replace__hint {
+  margin: 0 0 12px;
+  font-size: 14.5px;
+  line-height: 1.35;
+  color: var(--rv-muted);
+}
+.rv-replace__list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.rv-replace__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 10px 4px 8px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(48, 36, 110, 0.9), rgba(20, 14, 52, 0.9));
+  border: 1px solid var(--rv-line-2);
+  color: inherit;
+  font: inherit;
+}
+.rv-replace__item:active {
+  transform: scale(0.96);
+}
+.rv-replace__name {
+  max-width: 100%;
+  font-family: var(--rv-font-head);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rv-replace__lvl {
+  font-size: 12px;
+  color: var(--rv-muted);
+}
+
+/* ================================================================= tutorial cards (tutorial.js) */
+.rv-tut__list {
+  margin: 0 0 14px;
+  padding: 0 0 0 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rv-tut__item {
+  font-size: 15px;
+  line-height: 1.38;
+  color: var(--rv-text, #f7f3ff);
+}
+.rv-tut__item::marker {
+  color: #ffdb8f;
+  font-family: var(--rv-font-num);
+  font-size: 13px;
+}
+.rv-tut__ok {
+  width: 100%;
+}
+
+/* ================================================================= results: help after 2 losses */
+.rv-res__advice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding: 12px 14px;
+  border-color: rgba(255, 219, 143, 0.55);
+}
+.rv-res__advicetitle {
+  font-family: var(--rv-font-head);
+  font-size: 15px;
+  color: #ffdb8f;
+}
+.rv-res__advice ul {
+  margin: 0;
+  text-align: left;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 14px;
+  line-height: 1.35;
 }

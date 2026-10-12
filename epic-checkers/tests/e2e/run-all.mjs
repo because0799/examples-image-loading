@@ -3,7 +3,8 @@
 //
 //   node tests/e2e/run-all.mjs            full suite (demo games for every variant: ~15 min)
 //   node tests/e2e/run-all.mjs --quick    flow + pvp + robust + controller QA fixes + settings /
-//                                         frame budget + 3 demo games
+//                                         frame budget + 3 demo games + «Валькирии доски» (RPG:
+//                                         flow, manual play and targeting mechanics)
 //
 // Build first: node tools/build-web.mjs   (npm run e2e does both). E2E_WWW=<dir> tests another build.
 
@@ -21,6 +22,9 @@ const suites = [
   ['robust.mjs'],
   ['controller-e2e.mjs'],
   ['settings-e2e.mjs'],
+  ['rpg-flow.mjs'],
+  ['rpg-play.mjs'],
+  ['rpg-mechanics.mjs'],
   quick
     ? ['demo-all.mjs', '--variants', 'russian,turkish,international', '--themes', 'epic', '--giveaway', 'none']
     : ['demo-all.mjs'],

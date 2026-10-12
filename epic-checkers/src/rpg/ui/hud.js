@@ -32,6 +32,8 @@ import { readMs } from '../../ui/toasts.js';
 
 const BOARD_PAD = 4;
 const LOG_MAX = 3;
+/** Height of one log line incl. the gap (CSS .rv-log__line: 12.5px × 1.25 + 6px padding + 2px border, gap 3px). */
+const LOG_LINE_H = 27;
 const CINEMATIC_FAILSAFE_MS = 8000;
 const ACTIONS = ['move', 'attack', 'skill', 'ult', 'quirk', 'wait'];
 const ACTION_ICONS = { move: 'move', attack: 'attack', skill: 'skill', ult: 'ult', quirk: 'quirk', wait: 'wait', end: 'end' };
@@ -56,6 +58,7 @@ export function createBattleScreen(ui) {
     mode2: null, // active targeting mode
     state: null,
     cinematic: 0,
+    logMax: LOG_MAX, // lines that fit the lane above the board (layout())
   };
 
   // ---------------------------------------------------------------- top bar
@@ -117,6 +120,16 @@ export function createBattleScreen(ui) {
   const slot = h('div', { id: 'board-slot' });
   const logEl = h('div.rv-log', { 'aria-live': 'polite' });
   const toastEl = h('div.rv-bt__toasts');
+  // first-battle coach bubble (hud.coach): one hint at a time over the top of the board
+  const coachText = h('div.rv-coach__text');
+  let coachOff = null;
+  const coachEl = h(
+    'div.rv-coach',
+    { hidden: true, 'aria-live': 'polite' },
+    h('span.rv-coach__ico', { 'aria-hidden': 'true' }, '教'),
+    coachText,
+    h('button.rv-coach__x', { type: 'button', 'aria-label': rt('tut.off'), title: rt('tut.off'), on: { click: ui.tap(() => coachOff && coachOff(), { sound: 'click' }) } }, '✕'),
+  );
   const boardArea = h('div.rv-bt__board', slot, logEl, toastEl);
 
   // ---------------------------------------------------------------- unit card + actions
@@ -166,7 +179,7 @@ export function createBattleScreen(ui) {
   };
   const actions = h('div.rv-actions', ...ACTIONS.map(mkAct), skipChip);
 
-  const battle = h('div.rv-bt', topBar, topRoster.el, boardArea, card, actions, botRoster.el);
+  const battle = h('div.rv-bt', topBar, topRoster.el, boardArea, card, actions, botRoster.el, coachEl);
   const el = h('div.rv-screen.rv-screen--battle', battle);
 
   // ---------------------------------------------------------------- helpers
@@ -326,12 +339,18 @@ export function createBattleScreen(ui) {
           roleBadge(hero.role),
           ...seals.map((s) => h('span.rv-ucard__seal', { style: { '--c': ELEMENTS[s].color }, title: rt('battle.seal', { el: L(ELEMENTS[s].name) }) }, ELEMENTS[s].kanji)),
         ),
-        h(
-          'div.rv-ucard__bars',
-          bar(hpP, { kind: 'hp', cls: 'rv-ucard__hp', label: `${fmt(Math.max(0, u.hp))} / ${fmt(u.maxHp)}${u.shield ? `  ◈${fmt(u.shield)}` : ''}` }),
-          bar(eP, { kind: 'energy', cls: `rv-ucard__en ${ready ? 'is-ready' : ''}`, label: ready ? rt('battle.ultReady') : `⚡ ${Math.round(u.energy || 0)} / ${u.maxEnergy || 0}` }),
-        ),
-        alive
+        // targeting a skill / Ultimate / quirk: its description takes the bars' + statuses' place
+        // (same card height, so the board never jumps)
+        alive && abilityOf(u, st.mode2)
+          ? null
+          : h(
+              'div.rv-ucard__bars',
+              bar(hpP, { kind: 'hp', cls: 'rv-ucard__hp', label: `${fmt(Math.max(0, u.hp))} / ${fmt(u.maxHp)}${u.shield ? `  ◈${fmt(u.shield)}` : ''}` }),
+              bar(eP, { kind: 'energy', cls: `rv-ucard__en ${ready ? 'is-ready' : ''}`, label: ready ? rt('battle.ultReady') : `⚡ ${Math.round(u.energy || 0)} / ${u.maxEnergy || 0}` }),
+            ),
+        alive && abilityOf(u, st.mode2)
+          ? abilityLine(abilityOf(u, st.mode2))
+          : alive
           ? h(
               'div.rv-ucard__sts',
               ...statusList(u).map((s) => h('span.rv-ucard__st', { class: `is-${s.kind}`, style: { '--c': s.color }, title: L(s.desc) }, h('i', STATUS_GLYPHS[s.id] || '•'), L(s.name), s.turns ? h('small', `${s.turns}`) : null)),
@@ -342,6 +361,77 @@ export function createBattleScreen(ui) {
     );
     ui.refit(card);
   }
+
+  // ---------------------------------------------------------------- abilities (what does it do / why not)
+  /** { kind, name, desc } of the selected heroine's skill / ult / quirk (null for move / attack). */
+  function abilityOf(u, type) {
+    const hero = u ? getHero(u.heroId) : null;
+    if (!hero || !type) return null;
+    if (type === 'skill' && hero.skill) return { kind: rt('battle.actions.skill'), name: L(hero.skill.name), desc: L(hero.skill.desc) };
+    if (type === 'ult' && hero.ultimate) return { kind: rt('battle.actions.ult'), name: L(hero.ultimate.name), desc: L(hero.ultimate.desc) };
+    if (type === 'quirk') {
+      const q = quirkInfo(st.actions);
+      const def = q && (hero.quirks || []).find((x) => x.id === q.id);
+      if (def) return { kind: rt('battle.actions.quirk'), name: L(def.name), desc: L(def.desc) };
+    }
+    return null;
+  }
+
+  function abilityLine(ab) {
+    return h('div.rv-ucard__abil', h('b', `${ab.kind} «${ab.name}»`), ' ', ab.desc);
+  }
+
+  /** Why a disabled action button cannot be used now (+ what the ability does): toast text. */
+  function whyNot(type) {
+    const u = st.selected != null ? unitById(st.state, st.selected) : null;
+    const a = st.actions;
+    const myTurn = st.mode === 'duel' || st.side === st.playerSide;
+    if (st.busy) return '';
+    if (!myTurn) return rt('battle.why.enemyTurn');
+    if (!u) return rt('battle.why.noSelection');
+    const mine = st.mode === 'duel' ? u.side === st.side : u.side === st.playerSide;
+    if (!mine) return rt('battle.why.notMine');
+    if (u.alive === false || u.hp <= 0) return rt('battle.why.ko');
+    if (!a) return rt('battle.why.noSelection');
+    const hero = getHero(u.heroId);
+    const ab = abilityOf(u, type);
+    const desc = ab ? ` ${ab.desc}` : '';
+    const moved = st.moved || !!(a.canEnd && !a.canWait);
+    if (type === 'move') return moved ? rt('battle.why.moved') : rt('battle.why.moveBlocked');
+    if (type === 'attack') return rt('battle.why.attack');
+    if (type === 'skill') {
+      const info = a.skill || {};
+      const cd = typeof info.cooldown === 'number' ? info.cooldown : u.cd && typeof u.cd.skill === 'number' ? u.cd.skill : 0;
+      if (info.reason === 'cooldown' || cd > 0) return rt('battle.why.skillCd', { name: ab ? ab.name : '', n: cd }) + desc;
+      const r = reasonText(info, u, 'skill');
+      return (r && info.reason !== 'no-targets' && info.reason !== 'targets' ? `${r}. ` : '') + rt('battle.why.noTargets', { name: ab ? ab.name : '' }) + desc;
+    }
+    if (type === 'ult') {
+      const info = a.ult || {};
+      const cur = Math.round(typeof info.energy === 'number' ? info.energy : u.energy || 0);
+      const max = typeof info.cost === 'number' ? info.cost : u.maxEnergy || 0;
+      if (info.reason === 'energy' || cur < max) return rt('battle.why.ultEnergy', { name: ab ? ab.name : '', cur, max }) + desc;
+      const r = reasonText(info, u, 'ult');
+      return (r && info.reason !== 'no-targets' && info.reason !== 'targets' ? `${r}. ` : '') + rt('battle.why.noTargets', { name: ab ? ab.name : '' }) + desc;
+    }
+    if (type === 'wait' || type === 'end') return hero ? rt('battle.why.cant', { name: L(hero.name) }) : '';
+    return '';
+  }
+
+  // taps on a disabled action button (pointer-events: none → the bar gets them) explain why
+  actions.addEventListener('click', (ev) => {
+    // a click that hit a button was an enabled one (disabled ones let taps through); by now its own
+    // handler may already have disabled the bar (busy), so only taps on the bar itself count here
+    if (ev.target && ev.target.closest && ev.target.closest('.rv-act, .rv-bt__skip')) return;
+    const b = Object.values(actBtns).find((x) => {
+      if (!x.disabled || x.hidden) return false;
+      const r = x.getBoundingClientRect();
+      return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+    });
+    if (!b) return;
+    const text = whyNot(b.dataset.type || b.dataset.act);
+    if (text) toast(text, { tone: 'why' });
+  });
 
   // ---------------------------------------------------------------- actions
   function reasonText(info, u, kind) {
@@ -436,8 +526,10 @@ export function createBattleScreen(ui) {
   }
 
   function setMode(type) {
+    const changed = (type || null) !== st.mode2;
     st.mode2 = type || null;
     paintActions();
+    if (changed) paintCard();
   }
 
   // ---------------------------------------------------------------- log feed
@@ -447,11 +539,7 @@ export function createBattleScreen(ui) {
     logEl.appendChild(node);
     const entry = { node, t: 0 };
     logLines.push(entry);
-    while (logLines.length > LOG_MAX) {
-      const old = logLines.shift();
-      clearTimeout(old.t);
-      old.node.remove();
-    }
+    trimLog();
     const ms = Math.max(2600, readMs(line.text, ui.settings.textTime || 1.5) * 0.9);
     entry.t = setTimeout(() => {
       node.classList.add('is-out');
@@ -461,6 +549,14 @@ export function createBattleScreen(ui) {
         if (i >= 0) logLines.splice(i, 1);
       }, 380);
     }, ms);
+  }
+  /** Keeps only the newest lines that fit (a squeezed line would shrink into an empty pill). */
+  function trimLog() {
+    while (logLines.length > st.logMax) {
+      const old = logLines.shift();
+      clearTimeout(old.t);
+      old.node.remove();
+    }
   }
   function clearLog() {
     for (const l of logLines.splice(0)) {
@@ -484,6 +580,22 @@ export function createBattleScreen(ui) {
   }
 
   // ---------------------------------------------------------------- layout
+  /** The coach bubble sits in the lane above the board, or over the enemy roster when that lane
+   *  is too low for it (small phones): never over the board's top rows. */
+  function placeCoach() {
+    if (coachEl.hidden || !el.isConnected) return;
+    const b = battle.getBoundingClientRect();
+    const a = boardArea.getBoundingClientRect();
+    const sl = slot.getBoundingClientRect();
+    const lane = sl.top - a.top;
+    const ch = coachEl.offsetHeight || 48;
+    const inLane = lane >= ch + 4;
+    const top = inLane ? a.top - b.top + Math.max(2, (lane - ch) / 2) : topRoster.el.getBoundingClientRect().top - b.top;
+    coachEl.style.top = `${Math.round(top)}px`;
+    // in the lane it takes the log's place (the log comes back when the coach is done)
+    boardArea.classList.toggle('has-coach', inLane);
+  }
+
   let lastRect = '';
   function layout() {
     if (!el.isConnected) return;
@@ -499,7 +611,12 @@ export function createBattleScreen(ui) {
     slot.style.top = top + 'px';
     el.style.setProperty('--board', size + 'px');
     el.style.setProperty('--lane', Math.max(0, top) + 'px');
-    logEl.classList.toggle('is-over', top < 34);
+    const over = top < 34;
+    logEl.classList.toggle('is-over', over);
+    // over the board (no lane): 2 lines at most; in the lane: as many as fit (at least 1)
+    st.logMax = over ? 2 : Math.max(1, Math.min(LOG_MAX, Math.floor((top - 4 + 3) / LOG_LINE_H)));
+    trimLog();
+    placeCoach();
     const r = slotRect();
     const key = `${r.x},${r.y},${r.width},${r.height}`;
     if (key !== lastRect) {
@@ -580,6 +697,9 @@ export function createBattleScreen(ui) {
       readState(state);
       clearLog();
       toastEl.textContent = '';
+      coachOff = null;
+      coachEl.hidden = true;
+      boardArea.classList.remove('has-coach');
       el.classList.toggle('is-duel', st.mode === 'duel');
       renderAll();
       requestAnimationFrame(layout);
@@ -649,6 +769,23 @@ export function createBattleScreen(ui) {
       topRoster.key = '';
       botRoster.key = '';
       renderAll();
+    },
+    /** Coach hint (null hides it); onOff: the ✕ («no more tips»). */
+    coach(text, { onOff = null } = {}) {
+      coachOff = onOff;
+      if (!text) {
+        coachEl.hidden = true;
+        boardArea.classList.remove('has-coach');
+        return;
+      }
+      if (coachText.textContent !== text) {
+        coachText.textContent = text;
+        coachEl.classList.remove('is-new');
+        void coachEl.offsetWidth;
+        coachEl.classList.add('is-new');
+      }
+      coachEl.hidden = false;
+      placeCoach();
     },
     toast,
     lanes,

@@ -32,6 +32,7 @@ export function resolveStage(stage) {
     boss: !!st.boss,
     bossHero: st.bossHero || null,
     hpMult: st.hpMult || 1,
+    atkMult: st.atkMult || 1,
     miniBoss: st.miniBoss ? { hero: st.miniBoss.hero, hpMult: st.miniBoss.hpMult || 3 } : null,
     elite: st.elite || [],
     rule: st.rule ? { ...st.rule } : null,
@@ -64,12 +65,12 @@ export function resolveStage(stage) {
 /** Boss / mini-boss descriptor for a squad entry of the enemy side (null when not a boss). */
 export function bossFor(stage, entry, taken) {
   if (!stage) {
-    if (entry.boss || entry.miniBoss) return { mini: !!entry.miniBoss && !entry.boss, hpMult: entry.hpMult || 1, mechanics: [], phase: 1 };
+    if (entry.boss || entry.miniBoss) return { mini: !!entry.miniBoss && !entry.boss, hpMult: entry.hpMult || 1, atkMult: entry.atkMult || 1, mechanics: [], phase: 1 };
     return null;
   }
   if ((entry.boss || (stage.boss && stage.bossHero === entry.heroId)) && !taken.boss) {
     taken.boss = true;
-    return { mini: false, hpMult: entry.hpMult || stage.hpMult || 1, mechanics: stage.mechanics.slice(), phase: 1 };
+    return { mini: false, hpMult: entry.hpMult || stage.hpMult || 1, atkMult: entry.atkMult || stage.atkMult || 1, mechanics: stage.mechanics.slice(), phase: 1 };
   }
   if ((entry.miniBoss || (stage.miniBoss && stage.miniBoss.hero === entry.heroId)) && !taken.mini) {
     taken.mini = true;

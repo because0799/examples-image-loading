@@ -19,6 +19,8 @@ const MIME = {
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.woff2': 'font/woff2',
+  '.webp': 'image/webp',
+  '.mp3': 'audio/mpeg',
 };
 
 export async function startServer(root = WWW) {

@@ -14,11 +14,12 @@
 //   ?screen=game&variant=turkish&mode=ai|pvp|demo&epic=0|1&color=1|-1|0&level=1..5&giveaway=0|1
 //          &pos=<stateString>&intro=0   start a game directly (skips title / menu)
 //   ?screen=menu|setup|settings|rules|stats   open that screen directly
+//   ?screen=rpg[&rpgScreen=summon|collection|campaign|...]   open «Валькирии доски» (RPG hub)
 //   (no ?screen: the title screen; an autosaved unfinished game is offered for resumption)
 //
 // window.__app = { game, controller, renderer, fx, director, ui, audio, ai, native, settings,
-//                  stats, perf, quality (= perf.adaptive), startGame(cfg), playPath(path),
-//                  setPosition(str), state() }
+//                  stats, perf, quality (= perf.adaptive), rpg (src/rpg/controller.js),
+//                  startGame(cfg), playPath(path), setPosition(str), state() }
 
 import * as storage from './ui/storage.js';
 import { UI } from './ui/ui.js';
@@ -29,6 +30,7 @@ import { AudioEngine } from './audio/audio.js';
 import { AIClient } from './ai/ai-client.js';
 import { native } from './platform/native.js';
 import { Controller } from './controller.js';
+import { RpgController } from './rpg/index.js';
 import { text } from './controller-text.js';
 import { readSave, clearSave } from './app-save.js';
 import { PerfManager } from './app-perf.js';
@@ -37,6 +39,8 @@ import { loc } from './ui/i18n.js';
 
 /* global __DEV__ */
 const DEV = typeof __DEV__ !== 'undefined' && __DEV__;
+/** App version shown on the title / settings screens (android/AndroidManifest.xml versionName). */
+export const APP_VERSION = '1.2.0';
 const params = new URLSearchParams(location.search);
 const debug = params.get('debug') === '1' || DEV;
 
@@ -137,7 +141,7 @@ async function boot() {
 
   const statsStore = new storage.StatsStore();
   const audio = new AudioEngine({ sfxVolume: settings.sfxVolume, musicVolume: settings.musicVolume });
-  const ui = new UI(document.getElementById('ui'), { settings, stats: statsStore, audio, native });
+  const ui = new UI(document.getElementById('ui'), { settings, stats: statsStore, audio, native, version: APP_VERSION });
 
   const renderer = new Renderer(document.getElementById('stage'));
   try {
@@ -198,6 +202,7 @@ async function boot() {
   // ------------------------------------------------------------------ frame budget + settings
   // 60 fps cap (30 with the battery saver), 'auto' quality with adaptive step down, ticker
   // stopped in the background (src/app-perf.js). Then every module gets the settings.
+  let rpgRef = null; // the RPG controller (created below): its battles count for adaptive quality too
   const perf = new PerfManager({
     settings,
     renderer,
@@ -206,7 +211,9 @@ async function boot() {
     urlQuality,
     adaptive: params.get('adaptive') !== '0',
     isActive: () => {
-      if (!controller.active || controller.paused || ui.currentScreen !== 'game') return false;
+      const rb = rpgRef && rpgRef.visible && rpgRef.battleActive ? rpgRef.battle : null;
+      const rpgBattle = !!(rb && !rb.paused && rpgRef.ui && rpgRef.ui.currentScreen === 'battle');
+      if (!rpgBattle && (!controller.active || controller.paused || ui.currentScreen !== 'game')) return false;
       if (document.visibilityState === 'hidden' || native.isPaused) return false;
       // a deliberate slow-mo / hit-stop is not a slow phone
       const clk = renderer.clock;
@@ -217,6 +224,26 @@ async function boot() {
   controller.perf = perf;
   perf.attach();
   controller.applySettings(settings);
+
+  // ------------------------------------------------------------------ «Валькирии доски» (RPG mode)
+  // Its own session controller (src/rpg/controller.js): RpgUI mounts inside #ui over the classic
+  // screens (hidden while it is up), BattleView borrows the renderer / FX during battles.
+  const rpg = new RpgController({
+    root: document.getElementById('ui'),
+    classicUi: ui,
+    renderer,
+    fx,
+    audio,
+    native,
+    settings,
+    perf,
+    opts: { debug, fast: params.get('fast') === '1', autoSkip: params.get('autoskip') === '1' },
+  });
+  rpgRef = rpg;
+  ui.on('open-rpg', () => {
+    if (controller.active) return;
+    rpg.open().catch((e) => console.error('[app] RPG open failed', e));
+  });
 
   // ------------------------------------------------------------------ UI events
   ui.on('play', (cfg) => controller.startGame(cfg));
@@ -241,7 +268,10 @@ async function boot() {
       console.warn('[app] skip failed', e);
     }
   });
-  ui.on('settings', (s) => controller.applySettings(s));
+  ui.on('settings', (s) => {
+    controller.applySettings(s);
+    rpg.applySettings(s);
+  });
   ui.on('theme', (t) => {
     if (!controller.active) controller._setTheme(t);
   });
@@ -269,6 +299,8 @@ async function boot() {
   let rootBackAt = 0;
   let uiDoublePress = false; // the UI implements «press Back again» itself (its window, its toast)
   native.setBackHandler(() => {
+    // the RPG layer handles back itself (overlays → screens → pause in battle; hub → classic menu)
+    if (rpg.visible) return rpg.handleBack();
     const screen = ui.currentScreen;
     const root = screen === 'title' || screen === 'menu';
     const overlay = !!document.querySelector('#ui .ov:not(.is-closing)');
@@ -286,6 +318,7 @@ async function boot() {
     return true;
   });
   native.onPause(() => {
+    rpg.onAppPause(true);
     controller.onAppPause(true);
     try {
       audio.pause();
@@ -302,6 +335,7 @@ async function boot() {
     }
   });
   native.onResume(() => {
+    rpg.onAppPause(false);
     controller.onAppPause(false);
     try {
       audio.resume();
@@ -329,6 +363,7 @@ async function boot() {
       stats: statsStore,
       perf,
       quality: perf.adaptive,
+      rpg,
       text,
       errors,
       startGame: (cfg) => controller.startGame(cfg),
@@ -353,7 +388,10 @@ async function boot() {
     controller.startGame(urlCfg, { startState, intro: params.get('intro') !== '0' });
   } else {
     const screen = params.get('screen');
-    if (screen && ['menu', 'setup', 'settings', 'rules', 'stats'].includes(screen)) {
+    if (screen === 'rpg') {
+      ui.showScreen('menu');
+      await rpg.open({ screen: params.get('rpgScreen') || 'hub' });
+    } else if (screen && ['menu', 'setup', 'settings', 'rules', 'stats'].includes(screen)) {
       ui.showScreen(screen, screen === 'setup' ? { mode: params.get('mode') || 'ai' } : {});
     } else {
       ui.showScreen('title');

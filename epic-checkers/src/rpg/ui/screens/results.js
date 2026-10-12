@@ -20,7 +20,24 @@ import {
   isVoiced,
   STAGE_LIST,
   profileSquad,
+  ELEMENTS,
 } from '../model.js';
+
+function stageAdviceOf(ui, stageId) {
+  try {
+    return ui.meta && typeof ui.meta.stageAdvice === 'function' ? ui.meta.stageAdvice(ui.profile, stageId) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function squadPowerOf(ui) {
+  try {
+    return ui.meta && typeof ui.meta.squadPower === 'function' ? ui.meta.squadPower(ui.profile, profileSquad(ui.profile)) : 0;
+  } catch (e) {
+    return 0;
+  }
+}
 
 export function createResults(ui, params = {}) {
   const result = params.result || {};
@@ -141,6 +158,32 @@ export function createResults(ui, params = {}) {
   }
 
   if (outcome === 'defeat') parts.push(h('p.rv-note', rt('results.defeatText'), h('br'), rt('results.tip')));
+  // GDD §14.4 «помощь при поражении»: after 2 losses in a row on a stage — what to change, and a
+  // training button at the stage's level
+  const advice = outcome === 'defeat' && mode === 'campaign' && stage ? stageAdviceOf(ui, stage.id) : null;
+  if (advice && advice.show) {
+    const lines = [];
+    const power = squadPowerOf(ui);
+    if (power && advice.recommendedPower && power < advice.recommendedPower) lines.push(rt('results.advice.power', { power: fmt(power), rec: fmt(advice.recommendedPower) }));
+    if (advice.counterElements && advice.counterElements.length) lines.push(rt('results.advice.counter', { list: advice.counterElements.map((e) => L(ELEMENTS[e].name)).join(', ') }));
+    if (advice.avoidElements && advice.avoidElements.length) lines.push(rt('results.advice.avoid', { list: advice.avoidElements.map((e) => L(ELEMENTS[e].name)).join(', ') }));
+    lines.push(rt('results.advice.levels'));
+    parts.push(
+      h(
+        'div.rv-res__advice.rv-panel',
+        h('b.rv-res__advicetitle', rt('results.advice.title')),
+        h('ul', ...lines.map((t) => h('li', t))),
+        rvButton(ui, {
+          label: rt('results.advice.training', { n: advice.trainingLevel }),
+          icon: 'training',
+          kind: 'glass',
+          size: 'md',
+          cls: 'rv-btn--center',
+          onClick: () => ui.showScreen('training', { level: advice.trainingLevel }),
+        }),
+      ),
+    );
+  }
   if (outcome === 'draw' && !duel) parts.push(h('p.rv-note', rt('results.drawText')));
   parts.push(h('div.rv-body__pad'));
 

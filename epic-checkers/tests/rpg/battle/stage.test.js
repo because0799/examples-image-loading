@@ -169,7 +169,11 @@ test('Bosses: HP ×mult, control → Stagger stacks, 3 stacks → Break (skips i
   const boss = U(s, 'b0');
   assert.ok(boss.boss && !boss.boss.mini);
   const plain = createBattle({ sides: { 1: [E('vera')], [-1]: [E('tsubame')] } }).units[1];
-  assert.equal(boss.maxHp, plain.maxHp * 5);
+  // HP × the stage's hpMult, ATK × its atkMult (rules.js CAMPAIGN 1-B)
+  const st1 = resolveStage('1-B');
+  assert.ok(st1.hpMult > 1 && st1.atkMult > 0 && st1.atkMult < 1);
+  assert.equal(boss.maxHp, Math.floor(plain.maxHp * st1.hpMult));
+  assert.equal(boss.atk, Math.floor(plain.atk * st1.atkMult));
   only(s, { a0: 'd4', a1: 'a1', a2: 'h2', b0: 'e5', b1: 'h8', b2: 'f8', b3: 'd8' });
   noCrits(s);
   U(s, 'a0').energy = U(s, 'a0').maxEnergy;
@@ -201,6 +205,7 @@ test('Bosses act once more every 3rd own turn; execute deals +100 % ATK instead 
   assert.ok(extra.some((e) => e.unit === 'b0' && e.boss));
   const k = noCrits(only(campaign('1-B', ['karasu'], [E('tsubame'), E('kaede', 8)]), { a0: 'd4', b0: 'f6', b1: 'h8' }));
   U(k, 'a0').energy = U(k, 'a0').maxEnergy;
+  U(k, 'b0').maxHp = 5000; // a big HP pool: the ult's own hit must not KO her before the execute check
   U(k, 'b0').hp = Math.floor(0.2 * U(k, 'b0').maxHp);
   const r = act(k, { type: 'ult', unit: 'a0', target: sq('f6') });
   assert.ok(!evs(r.events, 'execute').length);
@@ -219,6 +224,25 @@ test('1-B Grey Swallow: feathers on her glide path Slow; once at 50 % HP she esc
   assert.ok(evs(r.events, 'rule').some((e) => e.rule === 'galeEscape'));
   assert.equal(rowOf(U(r.state, 'b0').sq), 0);
   assert.ok(U(r.state, 'b0').statuses.some((x) => x.id === 'untargetable'));
+});
+
+test('Campaign bosses never crown themselves on the back row and get no on-kill extra activations', () => {
+  // Tsubame (boss) lands on the player's back row: no awakening (no heal, no +50 energy, no flight)
+  const s = noCrits(only(campaign('1-B', ['vera', 'zlata'], [E('tsubame'), E('kaede', 8)]), { a0: 'a1', a1: 'h2', b0: 'e3', b1: 'h8' }));
+  s.zones = [];
+  turn(s, -1);
+  const r = act(s, { type: 'move', unit: 'b0', to: sq('c1') });
+  assert.equal(U(r.state, 'b0').sq, sq('c1'));
+  assert.ok(!U(r.state, 'b0').awakened);
+  assert.ok(!evs(r.events, 'awaken').length);
+  // a KO by the boss: no Updraft extra activation
+  const k = noCrits(only(campaign('1-B', ['iskra', 'vera'], [E('tsubame'), E('kaede', 8)]), { a0: 'd4', a1: 'a1', b0: 'e5', b1: 'h8' }));
+  k.zones = [];
+  turn(k, -1);
+  U(k, 'a0').hp = 1;
+  const r2 = act(k, { type: 'basic', unit: 'b0', target: sq('d4') });
+  assert.ok(evs(r2.events, 'ko').some((e) => e.unit === 'a0'));
+  assert.ok(!evs(r2.events, 'extraActivation').some((e) => e.unit === 'b0' && !e.boss));
 });
 
 test('2-B Ashen Phoenix: Egg of 20 % boss HP that returns at 50 %; Fire Rain every 3rd round, telegraphed a turn ahead', () => {
@@ -250,7 +274,8 @@ test('3-B Faceless Queen: starts crowned (loses it at 10 %), heals of the player
   const s = campaign('3-B', ['mashiro', 'vera'], sq6, { level: 30 });
   const boss = U(s, 'b0');
   assert.ok(boss.awakened);
-  assert.equal(boss.maxHp % 6, 0);
+  const plainQ = createBattle({ sides: { 1: [E('vera')], [-1]: [E('nocturna', 30)] } }).units[1];
+  assert.equal(boss.maxHp, Math.floor(plainQ.maxHp * resolveStage('3-B').hpMult));
   // phase 1 healing malus
   const h = only(JSON.parse(JSON.stringify(s)), { a0: 'd4', a1: 'f6', b0: 'h8', b1: 'b8' });
   h.zones = [];

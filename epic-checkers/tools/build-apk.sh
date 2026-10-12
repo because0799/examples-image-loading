@@ -107,7 +107,7 @@ cp -R "$RES_SRC/." "$BUILD/res/"
 cp -R "$WWW/." "$BUILD/assets/www/"
 # never ship source maps, debug copies, unused icons or stray OS files (F5)
 find "$BUILD/assets" \( -name '*.map' -o -name '.DS_Store' -o -name 'Thumbs.db' \) -type f -delete
-rm -f "$BUILD/assets/www/ai-worker.js" "$BUILD/assets/www/icon-512.png"
+rm -f "$BUILD/assets/www/ai-worker.js" "$BUILD/assets/www/rpg-ai-worker.js" "$BUILD/assets/www/icon-512.png"
 sed -i '/href="icon-512\.png"/d' "$BUILD/assets/www/index.html"
 # a --dev bundle (inline source map, __DEV__ = true → debug hooks on) must never be packaged
 if grep -q 'sourceMappingURL=data:' "$BUILD/assets/www/app.js"; then

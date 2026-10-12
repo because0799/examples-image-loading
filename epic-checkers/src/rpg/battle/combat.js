@@ -717,7 +717,9 @@ export function landed(ctx, u, o = {}) {
         zonesOnEnter(ctx, u);
       }
     }
-    if (onAwakenRow(ctx.s, u)) awakenUnit(ctx, u, { full: true });
+    // campaign bosses never crown themselves (a turn-1 flying jump onto the back row gave the boss
+    // a heal, +50 energy, flight and an Ultimate on turn 2); 3-B starts crowned by its own rule
+    if (onAwakenRow(ctx.s, u) && !(u.boss && !u.boss.mini)) awakenUnit(ctx, u, { full: true });
   }
 }
 

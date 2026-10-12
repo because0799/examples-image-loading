@@ -48,7 +48,7 @@ function validateSquad(squad, side) {
 
 /**
  * createBattle({ sides: { 1: Squad, [-1]: Squad }, mode, stage, seed, first = 1 | -1 | 'random', roundLimit? })
- * Squad = [{ heroId, level, constellation, sq? (number or 'c3'), boss?, miniBoss?, hpMult?, reflection? }].
+ * Squad = [{ heroId, level, constellation, sq? (number or 'c3'), boss?, miniBoss?, hpMult?, atkMult?, reflection? }].
  */
 export function createBattle(opts = {}) {
   const { sides, mode = 'training', stage = null, seed = 1 } = opts;
@@ -99,7 +99,7 @@ export function createBattle(opts = {}) {
       const boss = side === -1 ? bossFor(st, entry, taken) : entry.boss ? bossFor(null, entry, taken) : null;
       const variant = bossVariant(st, entry.heroId, boss);
       const reflection = !!entry.reflection || (side === -1 && mode !== 'duel') || (mode === 'duel' && side === -1 && squads[1].some((e) => e.heroId === entry.heroId));
-      return makeUnit(entry, side, i, { boss, hpMult: boss ? boss.hpMult : entry.hpMult, variant, reflection });
+      return makeUnit(entry, side, i, { boss, hpMult: boss ? boss.hpMult : entry.hpMult, atkMult: boss ? boss.atkMult : entry.atkMult, variant, reflection });
     });
     deploySide(s, units, list, side, mode, st);
     s.units.push(...units);

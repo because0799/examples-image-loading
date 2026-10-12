@@ -2,7 +2,7 @@
 // level & XP, stats (now / next level), abilities with constellation numbers, the C1–C6
 // constellation, voice lines (Epic+). Footer: add to / remove from the squad (or go summon).
 
-import { h, rvIconButton, rvButton, heroSplash, rarityStars, elementBadge, roleBadge, bar, rvSeg, rvSection, constellationDots, heroVars } from '../components.js';
+import { h, rvIconButton, rvButton, heroSplash, rarityStars, elementBadge, roleBadge, bar, rvSeg, rvSection, constellationDots, heroVars, pickReplacement } from '../components.js';
 import { rvIcon } from '../icons.js';
 import { rt, L, LL, fmt } from '../i18n.js';
 import {
@@ -146,7 +146,17 @@ export function createHero(ui, params = {}) {
               ui.toast(rt(hero.gender === 'm' ? 'hero.removedM' : 'hero.removed', { name: L(hero.name) }));
             } else {
               if (squad.length >= SQUAD_SIZE) {
-                ui.toast(rt('hero.squadFull'));
+                pickReplacement(ui, squad, heroId, { levelOf: (id) => heroLevel(ui.profile, id) }).then((out) => {
+                  if (!out) return;
+                  const cur = profileSquad(ui.profile);
+                  const i = cur.indexOf(out);
+                  if (i < 0 || cur.includes(heroId)) return;
+                  const next = cur.slice();
+                  next[i] = heroId;
+                  ui.emit('set-squad', next);
+                  const old = getHero(out);
+                  ui.toast(rt('squad.replaced', { name: L(hero.name), old: old ? L(old.name) : out }));
+                });
                 return;
               }
               ui.emit('set-squad', [...squad, heroId]);
