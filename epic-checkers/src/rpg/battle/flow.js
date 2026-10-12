@@ -570,10 +570,12 @@ function finishActivation(ctx) {
   }
   if (!act.afterDone) {
     act.afterDone = true;
-    if (u.alive) {
-      fire(ctx, u, 'afterAction', { source: u.id, kind: act.kind || 'wait' });
+    // afterAction fires only when the activation included an action (basic / skill / ult / quirk /
+    // jump) — a Wait or a move-only activation has no action to follow.
+    if (u.alive && ACTION_KINDS.includes(act.kind)) {
+      fire(ctx, u, 'afterAction', { source: u.id, kind: act.kind });
       const bl = unitDef(u).rules.blinkAfterAction;
-      if (bl && ACTION_KINDS.includes(act.kind) && u.alive) act.pending.push({ kind: 'blink', range: bl.range, optional: false });
+      if (bl && u.alive) act.pending.push({ kind: 'blink', range: bl.range, optional: false });
     }
     flushKos(ctx);
     checkVictory(ctx);

@@ -93,7 +93,9 @@ function statusTurns(st) {
  * Returns { score, kos, affected, healed, teamMissing }.
  */
 export function evaluate(root, after, me, info, weights = {}) {
-  const dangerW = weights.danger != null ? weights.danger : W.danger;
+  // late-game pressure: the closer the round limit, the less the AI cares about exposure
+  const pressure = Math.min(1, Math.max(0, (root.round - 0.4 * root.roundLimit) / (0.6 * root.roundLimit)));
+  const dangerW = (weights.danger != null ? weights.danger : W.danger) * (1 - 0.7 * pressure);
   if (after.result) {
     const w = after.result.winner;
     return { score: w === me ? 1e6 : w === 0 ? -500 : -1e6, kos: 6, affected: 6, healed: 0, teamMissing: 0 };
@@ -117,7 +119,7 @@ export function evaluate(root, after, me, info, weights = {}) {
       const hpAfter = a.alive ? a.hp : 0;
       const loss = Math.max(0, b.hp - hpAfter) + Math.max(0, b.shield - (a.alive ? a.shield : 0));
       if (loss > 0) affected.add(b.id);
-      score += loss * val * W.damage;
+      score += loss * val * W.damage * (1 + 0.5 * pressure);
       if (!a.alive) {
         kos++;
         let bonus = W.koBonusPctMaxHp * b.maxHp + (b.energy >= b.maxEnergy ? W.koUltReadyBonusPctMaxHp * b.maxHp : 0);
@@ -168,7 +170,10 @@ export function evaluate(root, after, me, info, weights = {}) {
       const shieldGain = Math.max(0, a.shield - b.shield);
       if (shieldGain) {
         healed += shieldGain * 0.5;
-        score += shieldGain * W.shield * (threatTo(after, a) > 0 ? 1 : 0.35);
+        // a shield is worth what it will actually absorb: capped by the expected incoming damage
+        const threat = threatTo(after, a);
+        const useful = Math.min(shieldGain, 1.2 * threat);
+        score += (useful * W.shield + (shieldGain - useful) * 0.1) * (1 - 0.5 * pressure);
       }
       let de = a.energy - b.energy;
       if (b.id === info.actorId && info.kind === 'ult') de = 0;
@@ -217,7 +222,7 @@ export function evaluate(root, after, me, info, weights = {}) {
     const owner = unitById(after, z.owner);
     let covered = 0;
     for (const u of after.units) if (u.alive && u.side !== me && z.sqs.includes(u.sq)) covered++;
-    score += (owner ? owner.atk : 100) * (0.25 + 0.5 * covered);
+    score += (owner ? owner.atk : 100) * (covered ? 0.25 + 0.5 * covered : 0.1);
   }
   // positional terms for the activated hero
   const ra = unitById(root, info.actorId);
@@ -232,7 +237,17 @@ export function evaluate(root, after, me, info, weights = {}) {
     const want = aa.role === 'ranger' ? 3 : aa.role === 'mystic' || aa.role === 'oracle' ? 2 : 1;
     const nb = nearest(root, ra);
     const na = nearest(after, aa);
-    if (nb > want) score += 5 * (Math.min(nb, 9) - Math.max(want, Math.min(na, 9)));
+    if (nb > want) score += (5 + 15 * pressure) * (Math.min(nb, 9) - Math.max(want, Math.min(na, 9)));
+    // Bulwark: a Guardian next to allies protects them (−15 % damage); others like standing next to one
+    const adjAllies = (s, u) => after.units.filter((x) => x.alive && x !== u && x.side === u.side && x.sq >= 0 && dist(x.sq, u.sq) === 1);
+    if (aa.role === 'guardian') {
+      const before = adjAllies(root, ra).length;
+      const now = adjAllies(after, aa).length;
+      score += 0.15 * 0.5 * aa.atk * 2 * (Math.min(now, 3) - Math.min(before, 3));
+    } else {
+      const g = (s, u) => s.units.some((x) => x.alive && x !== u && x.side === u.side && x.role === 'guardian' && x.sq >= 0 && u.sq >= 0 && dist(x.sq, u.sq) === 1);
+      if (g(after, aa) && !g(root, ra)) score += 0.15 * threatTo(after, aa);
+    }
     const threat = threatTo(after, aa);
     score -= dangerW * Math.min(threat, aa.hp + aa.shield);
     if (threat >= aa.hp + aa.shield) score -= 0.25 * aa.maxHp;

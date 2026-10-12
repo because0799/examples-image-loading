@@ -4,30 +4,40 @@
 // no infinite CSS animation on the battle screen.
 //
 //   const ui = new RpgUI(rootEl /* #ui or a child */, { settings, audio, native, assets: RPG_ASSETS, voice: playVoice,
-//                                                     meta? /* src/rpg/meta module, optional */, profile? });
-//   ui.setProfile(profile)
+//                                                     meta? /* src/rpg/meta module, optional */, profile?, storage? });
+//   ui.setProfile(profile)                      re-renders the current screen (keeps scroll / drafts)
 //   ui.showScreen('hub'|'collection'|'hero'|'squad'|'summon'|'campaign'|'training'|'duel'|'battle'|'results', params)
 //   ui.on(event, fn) -> unsubscribe
-//   ui.hud.setup(state, opts) / update(state) / select(unitId, unitActions, opts) / clear() / log(events) / setBusy(bool) …
-//   await ui.playSummon(results)               // pull animation + reveals + results grid
-//   await ui.showResults({ result, rewards, … }) -> 'again' | 'next' | 'hub' | 'squad'
-//   ui.boardSlotRect() -> DOMRect;  ui.handleBack() -> boolean;  ui.hide(); ui.visible
+//   ui.hud.setup(state, opts) / update(state) / select(unitId, unitActions, opts) / setMode(type) / clear() /
+//         log(events) / setBusy(bool) / setThinking(bool) / setSpeed(x) / setAuto(on) / setCinematic(on) /
+//         flip(bottomSide) / toast(text) / lanes() / playerName(side)                  (see hud.js)
+//   await ui.playSummon(results) -> 'done' | 'again1' | 'again10'   pull animation + reveals + results grid
+//   await ui.showResults({ result, rewards, mode?, stageId?, squad?, squads?, playerSide?, mvp? })
+//         -> 'again' | 'next' | 'hub' | 'squad'   ('hub' / 'squad': the UI navigates there itself)
+//   await ui.passPhone(side)                    duel «Передай телефон» screen
+//   ui.openPause() · ui.openSettings() · await ui.confirm(text, opts) · ui.toast(text)
+//   ui.boardSlotRect() -> DOMRect;  ui.handleBack() -> boolean (Android back, while ui.visible)
+//   ui.show() / ui.hide() / ui.visible          the RPG layer (showScreen shows it; hide() on 'exit')
+//   ui.setEffectiveQuality('high'|'medium'|'low')   else read from the app root's q-* class
+//   ui.updateSettings({ rpgVoice?, voiceVolume?, sfxVolume?, musicVolume? })
 //
 // Screen params:
-//   hero      { heroId, from? }            collection / squad / summon … decides where «Назад» goes
-//   campaign  { chapter?, stageId? }       stageId opens that stage's sheet
-//   squad     { from?, stageId? }
-//   battle    — the HUD (ui.hud.setup first); results { result, rewards, … } (prefer ui.showResults)
+//   hero      { heroId, from?, tab? }        from: 'collection' (default) | 'squad' | 'summon' | 'hub' | 'campaign'
+//   campaign  { chapter?, stageId? }         stageId opens that stage's sheet
+//   squad     { from?, stageId? }            from a stage sheet: saving returns to the stage
+//   battle    — the HUD (ui.hud.setup first); results — use ui.showResults
 //
 // Events (payloads):
-//   'start-battle' { mode: 'campaign'|'training'|'duel', stageId?, squads: { 1: Squad, '-1'?: Squad },
-//                    difficulty?, bg?, enemyLevel?, first?: 1|-1|'coin', passPhone?: bool }
+//   'start-battle' { mode: 'campaign', stageId, squads: { 1: Squad }, difficulty, bg }
+//                  { mode: 'training', squads: { 1, '-1' }, difficulty, bg, enemyLevel, enemyKind }
+//                  { mode: 'duel', squads: { 1, '-1' }, first: 'coin', passPhone, levels: 'equal'|'owned' }
+//                  Squad = [{ heroId, level, constellation }]
 //   'summon' (count 1|10)        'set-squad' (heroIds)        'exit' (back to the checkers menu)
 //   'use-scroll' { heroId, count }  «Свиток опыта» on the hero screen (meta.useXpScrolls; then setProfile)
-//   'battle-action' { type: 'move'|'attack'|'skill'|'ult'|'quirk'|'wait'|'end'|'cancel', unitId }
-//   'select-unit' (unitId)       roster portrait tapped in the battle HUD
+//   'battle-action' { type: 'move'|'attack'|'skill'|'ult'|'quirk'|'wait'|'end'|'cancel', unitId, quirkId? }
+//   'select-unit' (unitId)       roster portrait tapped in the battle HUD (ignored while busy)
 //   'pause' / 'resume'           battle pause menu opened / closed
-//   'surrender' { side }         confirmed in the pause menu      'leave-battle'  (after a surrender in duel etc.)
+//   'surrender' { side }         confirmed in the pause menu
 //   'speed' (1|2)  'auto' (bool)  'skip'                         battle HUD chips
 //   'settings' (settings)        RPG settings changed (live shared object, already saved)
 //   'screen' (name)              'board-rect' (DOMRect)          'results' (choice)
@@ -257,6 +267,10 @@ export class RpgUI {
     if (this._visible) return;
     this._visible = true;
     this.el.classList.add('is-visible');
+    // the app's classic screens under the RPG layer stop rendering (display: none, rpg.css) — the
+    // battle screen is transparent and their looping menu animations would cost GPU time for nothing
+    this._classicRoot = this.host && this.host.closest ? this.host.closest('.ui-root') || this.host : this.host;
+    if (this._classicRoot) this._classicRoot.classList.add('rv-host-active');
     this.el.removeAttribute('aria-hidden');
     this._syncQuality();
     // the classic UI's feedback hooks (switches etc. from src/ui) point at our audio while visible
@@ -270,6 +284,7 @@ export class RpgUI {
     if (!this._visible) return;
     this._visible = false;
     this.el.classList.remove('is-visible');
+    if (this._classicRoot) this._classicRoot.classList.remove('rv-host-active');
     this.el.setAttribute('aria-hidden', 'true');
     this._closeOverlays();
     this._toasts.clear();
@@ -673,6 +688,7 @@ export class RpgUI {
     this._closeOverlays();
     this._battle.destroy();
     this._battle.dispose();
+    if (this._classicRoot) this._classicRoot.classList.remove('rv-host-active');
     this.el.remove();
     this._handlers.clear();
   }

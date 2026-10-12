@@ -66,6 +66,10 @@
 .rv-root.is-visible {
   display: block;
 }
+/* while the RPG layer is up, the app's classic screens (same #ui root) are not rendered at all */
+.rv-host-active > .ui-screens {
+  display: none !important;
+}
 .rv-root *,
 .rv-root *::before,
 .rv-root *::after {

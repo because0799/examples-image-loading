@@ -206,9 +206,12 @@ describe('Fuyuka — The Glacier Citadel', () => {
     const s = noCrits(only(battle(['fuyuka', 'vera'], ['shio', 'mara']), { a0: 'd4', a1: 'a1', b0: 'e5', b1: 'a7' }));
     const r = act(s, { type: 'basic', unit: 'a0', target: sq('e5') });
     assert.equal(U(r.state, 'a0').shield, Math.floor(0.1 * U(s, 'a0').maxHp));
-    const r2 = act(s, { type: 'move', unit: 'a0', to: sq('c3') });
-    const r3 = act(r2.state, { type: 'pass', unit: 'a0' });
+    // moving before acting: no shield; a Wait is not an action: no shield either
+    const m = noCrits(only(battle(['fuyuka', 'vera'], ['shio', 'mara']), { a0: 'd4', a1: 'a1', b0: 'f6', b1: 'a7' }));
+    const r3 = act(m, { type: 'basic', unit: 'a0', to: sq('e5'), target: sq('f6') });
     assert.equal(U(r3.state, 'a0').shield, 0);
+    const r4 = act(m, { type: 'pass', unit: 'a0' });
+    assert.equal(U(r4.state, 'a0').shield, 0);
   });
 });
 

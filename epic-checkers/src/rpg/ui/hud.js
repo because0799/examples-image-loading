@@ -9,7 +9,11 @@
 // ui.hud API:
 //   setup(state, { mode, playerSide = 1, bottomSide = playerSide, stageId?, roundLimit?, names?, speed?, auto?, canAuto? })
 //   update(state)                       round / turn / HP / energy / statuses (keyed DOM, no rebuild)
-//   select(unitId | null, unitActions?, { moved?, mode? })   selected unit card + action availability
+//   select(unitId | null, unitActions?, { moved?, mode? })   selected unit card + action availability.
+//                                       unitActions = battle unitActions(): moves, swaps, jumps, basic, basicHeal,
+//                                       skill { ok, reason, cooldown }, ult { ok, reason, energy, cost }, quirks[],
+//                                       canWait, canEnd (after a move: canEnd && !canWait -> «Завершить»).
+//                                       null = info card only (enemy / not her turn)
 //   setMode(type | null)                highlight the active action (the controller's targeting mode)
 //   log(events)                         battle log feed (last 3 lines, readable timing)
 //   setBusy(bool)                       actions locked + «Пропустить» chip while a cinematic plays

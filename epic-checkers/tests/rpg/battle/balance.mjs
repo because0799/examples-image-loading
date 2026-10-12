@@ -10,6 +10,8 @@
 //              the sides swapped ("mirrored"): win rate of every hero / rarity / role / element.
 //   mythic   — 1 Mythic + 5 Epics vs 6 Epics (GDD: 60–65 %, ≤ 70 %).
 //   rare-c4  — 6 Rares at C4 vs 6 Epics at C0 (GDD: 40–50 %).
+// --patch file.json applies experimental data overrides { "heroId": { "dotted.path": value } } to
+// heroes.js inside the workers (for trying balance changes before editing the data).
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -21,7 +23,20 @@ const arg = (name, def) => {
   return i >= 0 ? process.argv[i + 1] : def;
 };
 
-async function runGames(jobs, difficulty) {
+function applyDataPatch(HERO_BY_ID, patch) {
+  for (const [heroId, sets] of Object.entries(patch || {})) {
+    for (const [path, value] of Object.entries(sets)) {
+      const keys = path.split('.').map((k) => (/^\d+$/.test(k) ? Number(k) : k));
+      let n = HERO_BY_ID[heroId];
+      for (let i = 0; i < keys.length - 1; i++) n = n[keys[i]];
+      n[keys[keys.length - 1]] = value;
+    }
+  }
+}
+
+async function runGames(jobs, difficulty, patch) {
+  const { HERO_BY_ID } = await import(new URL('src/rpg/data/heroes.js', ROOT));
+  applyDataPatch(HERO_BY_ID, patch);
   const { createBattle, applyAction, battleResult } = await import(new URL('src/rpg/battle/index.js', ROOT));
   const { chooseAction } = await import(new URL('src/rpg/ai/index.js', ROOT));
   const out = [];
@@ -43,7 +58,7 @@ async function runGames(jobs, difficulty) {
 }
 
 if (!isMainThread) {
-  runGames(workerData.jobs, workerData.difficulty).then((res) => parentPort.postMessage(res));
+  runGames(workerData.jobs, workerData.difficulty, workerData.patch).then((res) => parentPort.postMessage(res));
 } else {
   const { HEROES } = await import(new URL('src/rpg/data/heroes.js', ROOT));
   const { makeRng } = await import(new URL('src/rpg/battle/rng.js', ROOT));
@@ -53,6 +68,8 @@ if (!isMainThread) {
   const workers = +arg('workers', Math.min(4, os.cpus().length));
   const difficulty = arg('difficulty', 'normal');
   const jsonOut = arg('json', null);
+  const patchFile = arg('patch', null);
+  const patch = patchFile ? JSON.parse(fs.readFileSync(patchFile, 'utf8')) : null;
   const rng = makeRng(arg('seed', 'balance'));
   const ids = HEROES.map((h) => h.id);
   const byRarity = (r) => HEROES.filter((h) => h.rarity === r).map((h) => h.id);
@@ -96,7 +113,7 @@ if (!isMainThread) {
       chunks.map(
         (c) =>
           new Promise((resolve, reject) => {
-            const w = new Worker(fileURLToPath(import.meta.url), { workerData: { jobs: c, difficulty } });
+            const w = new Worker(fileURLToPath(import.meta.url), { workerData: { jobs: c, difficulty, patch } });
             w.on('message', resolve);
             w.on('error', reject);
           }),
@@ -170,9 +187,10 @@ if (!isMainThread) {
       }
     }
   }
-  const maxMs = Math.max(...results.map((r) => r.maxMs));
+  const maxMs = results.map((r) => r.maxMs).sort((a, b) => a - b);
   say();
-  say(`AI: slowest decision ${maxMs.toFixed(0)} ms; unfinished battles: ${results.filter((r) => r.reason === 'unfinished').length}`);
+  say(`AI: slowest decision per battle — median ${maxMs[maxMs.length >> 1].toFixed(0)} ms, p99 ${maxMs[Math.floor(maxMs.length * 0.99)].toFixed(0)} ms, max ${maxMs[maxMs.length - 1].toFixed(0)} ms (${workers} workers in parallel); unfinished battles: ${results.filter((r) => r.reason === 'unfinished').length}`);
+  if (patch) say(`data patch: ${JSON.stringify(patch)}`);
   console.log(lines.join('\n'));
   if (jsonOut) fs.writeFileSync(jsonOut, JSON.stringify({ results, stat }, null, 1));
 }
