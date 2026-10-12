@@ -20,7 +20,7 @@ import { UI as ClassicUI } from '../ui/ui.js';
 import { HEROES, getHero } from '../rpg/data/heroes.js';
 import { RARITIES, GACHA, statsAt } from '../rpg/data/rules.js';
 import { setLang } from '../ui/i18n.js';
-import { MemoryStorage } from '../ui/storage.js';
+import { MemoryStorage, sanitizeSettings } from '../ui/storage.js';
 
 const q = new URLSearchParams(location.search);
 const screen = q.get('screen') || 'hub';
@@ -143,7 +143,7 @@ let profile = useMeta ? metaProfile(q.get('profile') || 'mid') : makeProfile(q.g
 
 // ------------------------------------------------------------------ the UI
 const root = document.getElementById('ui');
-const settings = { lang, sfxVolume: 0.8, musicVolume: 0.5, textTime: 1.5, haptics: 'strong', fx: { flashes: true } };
+const settings = q.get('classic') === '1' ? sanitizeSettings({ lang }) : { lang, sfxVolume: 0.8, musicVolume: 0.5, textTime: 1.5, haptics: 'strong', fx: { flashes: true } };
 // &classic=1: the app's classic UI owns #ui first (same root, same stylesheet) — checks that both coexist
 const classic = q.get('classic') === '1' ? new ClassicUI(root, { settings, audio: null, native: null }) : null;
 if (classic) classic.showScreen('menu');
