@@ -85,6 +85,7 @@ export class BattleView {
     this._fxTracked = new Set();
     this._speed = 1;
     this._safe = null;
+    this._deadline = null; // game-clock end of the running beat's time budget (see _budgeted)
     this._seenUlt = new Set();
     this.voiceGate = new VoiceGate(2);
     this.round = 0;
@@ -147,7 +148,7 @@ export class BattleView {
     L.bgRoot.addChild(this.bgVignette);
     this.bgDim = new Sprite(Texture.WHITE);
     this.bgDim.tint = 0x000000;
-    this.bgDim.alpha = 0;
+    this.bgDim.alpha = this._bgBase();
     L.bgRoot.addChild(this.bgDim);
     // board (world)
     L.boardRoot = mk('rpg-board');
@@ -352,6 +353,7 @@ export class BattleView {
     this.bgId = theme.id;
     this.theme = theme;
     if (!this.ready) return;
+    if (!this.worldDim.visible) this.bgDim.alpha = this._bgBase();
     this._boardKey = '';
     this._relayout(true);
     const url = this.assets && this.assets.bg ? this.assets.bg(theme.id) : null;
@@ -777,8 +779,10 @@ export class BattleView {
     for (const z of st.zones || []) {
       const look = ZONE_LOOK[z.kind] || ZONE_LOOK.default;
       for (const q of z.sqs || []) {
-        if (look.fxFrame && this.fx) add(null, q, { tex: this.fx.textures.frame(look.fxFrame), glow: look.glow, tint: look.tint, alpha: look.alpha, size: look.size, anim: look.anim });
-        else add(look.frame, q, { glow: look.glow, tint: look.tint, alpha: look.alpha, size: look.size, anim: look.anim });
+        for (const part of look.parts || [look]) {
+          if (part.fxFrame && this.fx) add(null, q, { tex: this.fx.textures.frame(part.fxFrame), glow: part.glow, tint: part.tint, alpha: part.alpha, size: part.size, anim: part.anim });
+          else add(part.frame, q, { glow: part.glow, tint: part.tint, alpha: part.alpha, size: part.size, anim: part.anim });
+        }
       }
     }
     for (const [, w] of this._warnings) for (const q of w.sqs) add('square', q, { glow: true, tint: 0xff3a2a, alpha: 0.5, size: 0.96, anim: 'warn' });
@@ -881,6 +885,32 @@ export class BattleView {
     this._previews = [];
   }
 
+  /**
+   * fn(on, info) when a full-screen cinematic (an Ultimate) starts (true) / ends (false): the UI may
+   * fade its HUD chrome meanwhile (ui.hud.setCinematic). Returns an unsubscribe function.
+   */
+  onCinematic(fn) {
+    if (typeof fn !== 'function') return NOOP;
+    this._cineFns = this._cineFns || [];
+    this._cineFns.push(fn);
+    return () => {
+      const i = this._cineFns.indexOf(fn);
+      if (i >= 0) this._cineFns.splice(i, 1);
+    };
+  }
+
+  emitCinematic(on, info = {}) {
+    if (!!on === !!this._cineOn) return;
+    this._cineOn = !!on;
+    for (const fn of (this._cineFns || []).slice()) {
+      try {
+        fn(!!on, info);
+      } catch (e) {
+        console.error('[rpg-render] cinematic handler failed', e);
+      }
+    }
+  }
+
   onTap(fn) {
     if (typeof fn !== 'function') return NOOP;
     this._tapFns.push(fn);
@@ -954,6 +984,8 @@ export class BattleView {
     const w2s = typeof this.renderer.worldToScreen === 'function' ? this.renderer.worldToScreen(x, y) : { x, y };
     if (w2s.x - hw < 0) s.x += -(w2s.x - hw);
     else if (w2s.x + hw > scr.width) s.x -= w2s.x + hw - scr.width;
+    // damage numbers keep clear of this label while it is up
+    if (this.numbers) this.numbers.block(s.x, y - sq * rise, hw * 2, (tex.fx && tex.fx.height ? tex.fx.height : tex.height) * 0.8, (delay || 0) + dur);
     const p = animate(
       dur,
       (e, k) => {
@@ -1053,6 +1085,26 @@ export class BattleView {
     }
   }
 
+  /**
+   * FX combo counter sized for the battle board: anchored over the board's top corner on the side
+   * AWAY from world x (where the hits land and their numbers rise), fitted to ~1.6 squares.
+   */
+  combo(n, { color, label, x } = {}) {
+    const fx = this.fx;
+    const L = this.layout;
+    if (!fx || !L || this._skipping || typeof fx.comboCounter !== 'function') return Promise.resolve(false);
+    // a running counter keeps its side (FX anchors the new number by the side passed in)
+    const live = fx.combo && !fx.combo.dead ? fx.combo : null;
+    const right = live ? live.side === 'right' : x != null && x < L.cx;
+    const r = this.renderer;
+    const z = r.camera ? r.camera.zoom || 1 : 1;
+    const wx = right ? L.bx + L.n * L.sq - L.sq * 0.15 : L.bx + L.sq * 0.15;
+    const p = typeof r.worldToScreen === 'function' ? r.worldToScreen(wx, L.by + L.sq * 1.1) : { x: wx, y: L.by + L.sq * 1.1 };
+    const scr = r.screen;
+    const at = { x: Math.max(8, Math.min(scr.width - 8, p.x)), y: Math.max(L.sq, Math.min(scr.height - L.sq, p.y)) };
+    return this.fxt(fx.comboCounter(n, { color, label, side: right ? 'right' : 'left', at, fit: L.sq * 1.6 * Math.min(1.2, z) }));
+  }
+
   /** Camera: bring world point (x, y) to the board centre at `zoom` (settings.fx.camera). */
   camFocus(x, y, zoom = 1.15, ms = 360, { realtime = false, k = 0.75 } = {}) {
     if (this._skipping || !this.pref('camera') || !this.layout) return Promise.resolve(false);
@@ -1081,6 +1133,11 @@ export class BattleView {
     this.fx.shake(i, ms);
   }
 
+  /** Resting darkness of the arena art (keeps the tokens and the board the brightest thing). */
+  _bgBase() {
+    return this.theme && this.theme.bgDim != null ? this.theme.bgDim : 0.2;
+  }
+
   /** Dim the world for a cinematic (k = brightness 0..1 of the uninvolved scene). */
   dimWorld(alpha, ms = 220, keep = []) {
     const keepSet = new Set(keep);
@@ -1094,7 +1151,7 @@ export class BattleView {
     for (const t of this.tokens.values()) tokFrom.set(t, t.dimK);
     return this.anim(ms, (e) => {
       this.worldDim.alpha = from + (target - from) * e;
-      this.bgDim.alpha = fromBg + (target * 0.8 - fromBg) * e;
+      this.bgDim.alpha = fromBg + (Math.max(this._bgBase(), target * 0.8) - fromBg) * e;
       for (const t of this.tokens.values()) {
         const to = keepSet.has(t.id) ? 1 : 1 - target * 0.75;
         const f0 = tokFrom.get(t);
@@ -1108,7 +1165,7 @@ export class BattleView {
   _undimNow() {
     this.worldDim.alpha = 0;
     this.worldDim.visible = false;
-    this.bgDim.alpha = 0;
+    this.bgDim.alpha = this._bgBase();
     for (const t of this.tokens.values()) t.setDim(1);
     for (const w of this.wards.values()) w.setDim(1);
   }
@@ -1129,7 +1186,7 @@ export class BattleView {
     const ph = this.clock.realNow / 1000;
     const gk = this.theme ? this.theme.glow : 0.08;
     this.arenaGlow.alpha = gk * (1 + 0.35 * Math.sin(ph * 0.8));
-    this.edgeGlow.alpha = 0.2 + 0.08 * Math.sin(ph * 2.1);
+    this.edgeGlow.alpha = 0.13 + 0.05 * Math.sin(ph * 2.1);
     for (const p of this._previews) p.c.alpha = 0.82 + 0.18 * Math.sin(ph * 6);
     // gentle parallax of the arena art with the camera
     if (this._bgFit) {
@@ -1249,6 +1306,7 @@ export class BattleView {
   }
 
   _finishCinematics(skipped) {
+    this.emitCinematic(false, { kind: 'end' });
     // a normal end lets name plates and lingering particles finish; a skip clears them at once
     if (skipped) {
       if (this.cutin) this.cutin.stop();
@@ -1274,8 +1332,8 @@ export class BattleView {
         return this._jumpBeat(beat, beat.events);
       case 'cast':
         if (beat.kind === 'ult') return playUltimate(this, beat);
-        if (beat.kind === 'basic') return this._basicBeat(beat);
-        return this._skillBeat(beat);
+        if (beat.kind === 'basic') return this._budgeted(BUDGET.attack, () => this._basicBeat(beat));
+        return this._budgeted(BUDGET.skill, () => this._skillBeat(beat));
       case 'victory':
         return this._victoryBeat(beat);
       case 'end':
@@ -1283,6 +1341,32 @@ export class BattleView {
       default:
         return this.applyEvents(beat.events, { stagger: 60 });
     }
+  }
+
+  /**
+   * Run a beat under its GDD time budget (ms at speed 1): KO pauses and closing waits shrink to
+   * what is left (a KO's shatter then finishes under the next beat instead of holding the board).
+   */
+  async _budgeted(ms, fn) {
+    const prev = this._deadline;
+    this._deadline = this.clock.now + this.T(ms);
+    try {
+      return await fn();
+    } finally {
+      this._deadline = prev;
+    }
+  }
+
+  /** Game-time ms left in the current beat's budget (Infinity outside a budgeted beat). */
+  _budgetLeft() {
+    return this._deadline == null ? Infinity : this._deadline - this.clock.now;
+  }
+
+  /** A closing / pacing wait clipped to the beat budget (minus `reserve` ms). */
+  _paceWait(ms, reserve = 0) {
+    const left = this._budgetLeft() - this.T(reserve);
+    const w = Math.min(this.T(ms), left);
+    return w > 8 ? this.wait(w, { raw: true }) : Promise.resolve(true);
   }
 
   // ------------------------------------------------------------------ generic event application
@@ -1485,6 +1569,38 @@ export class BattleView {
       case 'execute': {
         const t = this.tokens.get(e.unit);
         if (t) return vx.execute(t);
+        return null;
+      }
+      case 'wait': {
+        // the Wait action: the heroine braces (its +energy and «brace» status follow)
+        const t = this.tokens.get(e.unit);
+        if (!t) return null;
+        vx.pulse('glowRing', this.layers.vfxOver, { x: t.x, y: t.y, tint: t.sideColor, w0: this.sqSize * 1.5, w1: this.sqSize * 0.95, ms: 360, alpha: 0.9, fadeAt: 0.5 });
+        this.floatLabel(word('wait', this.lang), t.x, t.y - this.sqSize * 0.72, { colors: [0xffffff, t.sideColor], size: this.sqSize * 0.28, rise: 0.15 });
+        return this.wait(180);
+      }
+      case 'collision': {
+        // a push / pull slammed into the edge or another piece: bump at the blocked square
+        const t = this.piece(e.unit);
+        if (!t) return null;
+        const at = e.at != null && e.at >= 0 ? this.center(e.at, { x: 0, y: 0 }) : null;
+        const x = at ? (t.x + at.x) / 2 : t.x;
+        const y = at ? (t.y + at.y) / 2 : t.y;
+        vx.pulse('ring', this.layers.vfxOver, { x, y, tint: 0xfff2d8, w0: this.sqSize * 0.3, w1: this.sqSize * 1.1, ms: 260, alpha: 1 });
+        vx.emit('spark', x, y, { count: 8, color: 0xfff2d8 });
+        this.shake(0.15, 160);
+        this.sfx('impact', { intensity: 0.6 });
+        return null;
+      }
+      case 'turnSkipped': {
+        const L = this.layout;
+        if (L) this.floatLabel(word('skipped', this.lang), L.cx, L.cy, { colors: [0xffffff, this.sideColorOf(e.side)], size: this.sqSize * 0.42, rise: 0.1 });
+        return this.wait(420);
+      }
+      case 'wardAct': {
+        const w = this.wards.get(e.id);
+        if (!w) return null;
+        vx.pulse('glowRing', this.layers.vfxOver, { x: w.x, y: w.y, tint: e.kind === 'ball-lightning' ? 0xc49bff : 0xffffff, w0: this.sqSize * 0.5, w1: this.sqSize * 1.6, ms: 320, alpha: 0.9 });
         return null;
       }
       case 'extraActivation': {
@@ -1710,7 +1826,7 @@ export class BattleView {
     if (this.fx && this.pref('slowmo')) this.fx.hitStop(hopN >= 2 ? 90 : 60);
     this.punch(1.04 + 0.015 * hopN, 220);
     this.shake(0.18 + 0.06 * hopN, 220);
-    if (count > 1 && this.fx) this.fxt(this.fx.comboCounter(hopN, { color: el.color, label: word('hits', this.lang) }));
+    if (count > 1 && hopN >= 2) this.combo(hopN, { color: el.color, label: word('hits', this.lang), x: b.x });
     this.sfx(hopN >= 2 ? 'combo' : 'impact', { intensity: 0.7 + 0.1 * hopN });
     this.buzz(14 + 6 * hopN);
     await this.applyGroups(groups, { stagger: 50 });
@@ -1747,7 +1863,7 @@ export class BattleView {
       await this.applyGroups(groups, { hitFx: heal ? null : hitFx });
     } else await this.applyGroups(groups);
     await this.applyEvents(post);
-    await this.wait(160);
+    await this._paceWait(160);
   }
 
   async _skillBeat(beat) {
@@ -1797,7 +1913,7 @@ export class BattleView {
       await this.applyGroups(groups, { stagger: 60 });
     }
     await this.applyEvents(post);
-    await this.wait(200);
+    await this._paceWait(200);
   }
 
   _say(heroId, event, opts = {}) {
@@ -1818,10 +1934,19 @@ export class BattleView {
     this.buzz([30, 40, 50]);
     const p = this.vx.ko(t);
     const sq = this.sqSize;
-    if (this.fx && this.pref('kanji')) this.fxt(this.fx.kanji('撃破', t.x, t.y + sq * 0.05, { size: Math.round(sq * 0.82), color: elementFx(t.element).color, hold: readMs('撃破', 'kanji', this.settings) * 0.5, backdrop: 'burst' }));
+    // the 撃破 stamp sits on the shattering token; inside an Ultimate the ult's own kanji and the
+    // damage numbers already fill the board, so only the «НОКАУТ!» label is shown there
+    if (this.fx && this.pref('kanji') && !this._inUlt) this.fxt(this.fx.kanji('撃破', t.x, t.y + sq * 0.12, { size: Math.round(sq * 0.82), color: elementFx(t.element).color, hold: readMs('撃破', 'kanji', this.settings) * 0.5, backdrop: 'burst' }));
     this.floatLabel(word('ko', this.lang), t.x, t.y + sq * 0.62, { colors: [0xffffff, 0xff4d5e], size: sq * 0.3, rise: 0.1 });
-    await this.wait(Math.min(BUDGET.ko, 420));
-    await p;
+    t.alive = false; // the token is already hidden by the shatter; the board treats the square as free
+    if (!this._inUlt) {
+      // a KO is a beat of its own — except inside an Ultimate, whose timeline is fixed (≤ 4 s),
+      // and only as long as the attack / skill that caused it still has time in its budget
+      if (this._budgetLeft() === Infinity) {
+        await this.wait(Math.min(BUDGET.ko, 420));
+        await p;
+      } else await this._paceWait(420, 120);
+    }
     t.setAlive(false);
     t.sq = -1;
   }
@@ -1861,7 +1986,9 @@ export class BattleView {
     const p = this.center(e.sq, { x: 0, y: 0 });
     v.setPos(p.x, p.y);
     v.setHp(e.hp, e.maxHp);
-    await this.vx.wardSpawn(v);
+    // the ward rises while the action goes on (a short beat, never a wait)
+    this.vx.wardSpawn(v);
+    await this.wait(120);
   }
 
   async _wardOff(e) {
@@ -1892,7 +2019,14 @@ export class BattleView {
 
 // ---------------------------------------------------------------------------------------------
 const ZONE_LOOK = {
-  'phoenix-trail': { fxFrame: 'flame0', glow: true, tint: 0xff7a2a, alpha: 0.85, size: 0.55, anim: 'flicker' },
+  // scorched tile: a soot mark, a smouldering ember ring and a burning phoenix feather
+  'phoenix-trail': {
+    parts: [
+      { frame: 'dot', glow: false, tint: 0x1c0703, alpha: 0.6, size: 1.0, anim: null },
+      { frame: 'glowRing', glow: true, tint: 0xff5a1a, alpha: 0.5, size: 0.8, anim: 'flicker' },
+      { frame: 'feather', glow: true, tint: 0xffa23a, alpha: 0.85, size: 0.5, anim: 'flicker' },
+    ],
+  },
   'sand-rune': { frame: 'rune', glow: true, tint: 0xe3a13b, alpha: 0.8, size: 0.86, anim: 'pulse' },
   feathers: { frame: 'feather', glow: false, tint: 0xd9fff0, alpha: 0.85, size: 0.45, anim: null },
   dew: { frame: 'dew', glow: false, tint: 0xffffff, alpha: 0.9, size: 0.9, anim: null },

@@ -197,21 +197,21 @@ export const HL = Object.freeze({ move: 0x3ddc97, jump: 0xff4d4d, land: 0xffb547
 export const BOARD_THEMES = Object.freeze({
   'bg-dawn': {
     id: 'bg-dawn', arena: { x: 0.5, y: 0.56 },
-    light: [0xd9cfb6, 0xb9ab8c], lightAlpha: 0.86, dark: [0x1f3a4e, 0x0d1a26], darkAlpha: 0.96,
+    light: [0xc7b999, 0x9d8c6c], lightAlpha: 0.9, dark: [0x1f3a4e, 0x0d1a26], darkAlpha: 0.96,
     frame: [0xfff3d6, 0xc9a45a, 0x3a2a14], inlay: 0xe8b85a, gem: 0x6fd6ff, accent: 0x9fe8ff, rune: 0xbff2ff,
-    motes: { color: 0xffe6a0, kind: 'pollen', count: 14 }, vignette: 0x0a1020, glow: 0.07,
+    motes: { color: 0xffe6a0, kind: 'pollen', count: 14 }, vignette: 0x0a1020, glow: 0.07, bgDim: 0.3,
   },
   'bg-ash': {
     id: 'bg-ash', arena: { x: 0.5, y: 0.54 },
     light: [0x6e625e, 0x4e4442], lightAlpha: 0.9, dark: [0x2a1414, 0x120809], darkAlpha: 0.96,
     frame: [0x8a6a5a, 0x3a2420, 0x0c0606], inlay: 0xff7a3a, gem: 0xff5b3a, accent: 0xff8a4a, rune: 0xffa060,
-    motes: { color: 0xff9a4a, kind: 'embers', count: 18 }, vignette: 0x100406, glow: 0.12,
+    motes: { color: 0xff9a4a, kind: 'embers', count: 18 }, vignette: 0x100406, glow: 0.12, bgDim: 0.12,
   },
   'bg-sky': {
     id: 'bg-sky', arena: { x: 0.5, y: 0.55 },
-    light: [0xd6d2ec, 0xb2abd6], lightAlpha: 0.86, dark: [0x241c5c, 0x100b30], darkAlpha: 0.96,
+    light: [0xc3bde0, 0x9c94c8], lightAlpha: 0.9, dark: [0x241c5c, 0x100b30], darkAlpha: 0.96,
     frame: [0xfafaff, 0xa9a0e0, 0x2a2258], inlay: 0xb9a8ff, gem: 0xffd23f, accent: 0xb9a8ff, rune: 0xd8ccff,
-    motes: { color: 0xd8d0ff, kind: 'stars', count: 16 }, vignette: 0x06041a, glow: 0.1,
+    motes: { color: 0xd8d0ff, kind: 'stars', count: 16 }, vignette: 0x06041a, glow: 0.1, bgDim: 0.22,
   },
 });
 
@@ -259,7 +259,7 @@ export function ultLength(rarity) {
 // ----------------------------------------------------------------------------- floating numbers
 
 /**
- * Floating numbers (GDD §18.4): size in squares, rise 0.6 squares, readable hold scaled by
+ * Floating numbers (GDD §18.4): size in squares, rise 0.45 squares, readable hold scaled by
  * settings.textTime (default 1.5, like the classic readMs). Crit ×1.4, periodic ×0.7.
  */
 export const NUMBER_STYLE = Object.freeze({
@@ -267,7 +267,7 @@ export const NUMBER_STYLE = Object.freeze({
   critScale: 1.4,
   dotScale: 0.7,
   reactionScale: 1.2,
-  rise: 0.6,
+  rise: 0.45,
   stackShift: 0.25,
   maxVisible: 6,
   collapseAfter: 3,
@@ -328,6 +328,8 @@ export const WORDS = Object.freeze({
   defeat: { ru: 'ПОРАЖЕНИЕ', en: 'DEFEAT' },
   frozen: { ru: 'ЗАМОРОЖЕНА', en: 'FROZEN' },
   blocked: { ru: 'БЛОК', en: 'BLOCK' },
+  wait: { ru: 'ВЫЖИДАЕТ', en: 'WAITING' },
+  skipped: { ru: 'ХОД ПРОПУЩЕН', en: 'TURN SKIPPED' },
 });
 
 export function word(key, lang) {

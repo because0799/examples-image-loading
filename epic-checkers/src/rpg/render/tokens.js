@@ -97,6 +97,9 @@ export class TokenView {
     this.shadowS.alpha = 0.6;
     this.groundS = spr(I.frame('groundRing'), this.cGround);
     this.energyG = new Graphics();
+    // the ring is a few hundred vertices: Pixi's 'auto' mode would draw it on its own (2 draw calls
+    // per token, the portrait breaking the batch again); it is redrawn only when energy changes
+    this.energyG.context.batchMode = 'batch';
     this.cBase.addChild(this.energyG);
     this.portrait = spr(this._portraitTex(), this.cBase);
 

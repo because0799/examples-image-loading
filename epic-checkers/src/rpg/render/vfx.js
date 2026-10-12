@@ -314,6 +314,11 @@ export class VFX {
     return { x: p.x, y: p.y - (p.lift || 0) };
   }
 
+  /** A short beat after an effect — skipped inside an Ultimate, whose timeline is fixed. */
+  pad(ms) {
+    return this.view._inUlt ? Promise.resolve() : this.view.wait(ms);
+  }
+
   // ------------------------------------------------------------------ element building blocks
   /** Wind-up at the caster: element energy converging. */
   windup(el, caster, s = 1) {
@@ -929,7 +934,7 @@ export class VFX {
     this.slash(p.x, p.y, 0.8, { color: 0xff2e4d, length: 2, width: 1, duration: 320, flip: true });
     this.view.shake(0.3, 240);
     this.view.sfx('slash', { intensity: 1 });
-    await this.view.wait(200);
+    await this.pad(200);
   }
 
   extraTurn(t) {
@@ -964,7 +969,7 @@ export class VFX {
     this.lightning(a.x, a.y, b.x, b.y, { color: color || 0xc49bff, duration: 220, branches: 1 });
     this.emit('spark', b.x, b.y, { count: 6, color: color || 0xc49bff });
     this.view.sfx('zap', { intensity: 0.5 });
-    return this.view.wait(110);
+    return this.pad(110);
   }
 
   // ------------------------------------------------------------------ reactions
@@ -1044,7 +1049,7 @@ export class VFX {
       default:
         break;
     }
-    await v.wait(160);
+    await this.pad(160);
   }
 
   // ------------------------------------------------------------------ jump strike, KO, awaken
@@ -1098,8 +1103,12 @@ export class VFX {
     if (fx) this.fxCall('pillar', p.x, p.y, { color: GOLD, width: 1.1 * this.k, duration: 1300, godrays: fx.quality === 'high' });
     this.fxCall('rays', p.x, p.y, { color: GOLD, duration: 1300, size: sq * 4.5 });
     this.emit('stars', p.x, p.y, { count: 16, color: GOLD, radius: 0.8 });
-    if (v.pref('kanji') && fx) this.fxCall('kanji', '覚醒', p.x, p.y - sq * 0.6, { size: Math.round(sq * 1.3), color: GOLD, hold: readMs('覚醒', 'kanji', v.settings) * 0.6 });
-    v.floatLabel(word('awaken', v.lang), p.x, p.y + sq * 0.65, { colors: [0xfff6c8, GOLD], size: sq * 0.34, rise: 0.1 });
+    // awakening happens on a back rank: the lettering goes on the board side of the token, so the
+    // freshly crowned heroine is never hidden under her own 覚醒
+    const top = !v.layout || p.y < v.layout.cy;
+    const ky = top ? p.y + sq * 1.75 : p.y - sq * 1.1;
+    if (v.pref('kanji') && fx) this.fxCall('kanji', '覚醒', p.x, ky, { size: Math.round(sq * 1.3), color: GOLD, hold: readMs('覚醒', 'kanji', v.settings) * 0.6 });
+    v.floatLabel(word('awaken', v.lang), p.x, top ? p.y + sq * 0.7 : p.y + sq * 0.65, { colors: [0xfff6c8, GOLD], size: sq * 0.34, rise: 0.1 });
     await v.wait(560);
     this.pulse('halo', this.L.vfxOver, { x: p.x, y: p.y - sq * 0.6, tint: GOLD, w0: sq * 2.2, w1: sq * 0.8, ms: 420, alpha: 1, fadeAt: 0.7 });
     await v.wait(480);

@@ -349,10 +349,23 @@ export class CutIn {
     fit(sName, W * 0.9);
     fit(sUlt, W * 0.9);
     fit(sJp, W * 0.8);
-    if (sJp) sJp.position.set(W / 2, barH * 0.55);
-    if (sName) sName.position.set(W / 2, H - barH * 1.45);
-    if (sUlt) sUlt.position.set(W / 2, H - barH * 0.62);
-    this._sub = { rec, band: root, y: H - barH * 2.1 - 16, W, screen: true };
+    // the DOM HUD may stay over the top / bottom of the screen: keep the lettering inside the
+    // board area (between the HUD panels)
+    const L = v.layout;
+    const topY = L ? Math.max(barH * 0.55, L.y + L.total * 0.06) : barH * 0.55;
+    const botY = L ? Math.min(H - barH * 0.62, L.y + L.total * 0.97) : H - barH * 0.62;
+    if (sJp) sJp.position.set(W / 2, topY);
+    if (sUlt) sUlt.position.set(W / 2, botY);
+    if (sName) sName.position.set(W / 2, botY - (sUlt ? sUlt.height * 0.62 : 0) - (sName.height * 0.55));
+    const nameShade = new Sprite(v.icons.frame('dot'));
+    nameShade.anchor.set(0.5);
+    nameShade.tint = 0x000000;
+    nameShade.alpha = 0.55;
+    nameShade.width = W * 1.3;
+    nameShade.height = (sName ? sName.height : 40) * 3.2;
+    nameShade.position.set(W / 2, sName ? sName.y + (sUlt ? sUlt.height * 0.3 : 0) : botY);
+    textBox.addChildAt(nameShade, 0);
+    this._sub = { rec, band: root, y: botY + (sUlt ? sUlt.height * 0.6 : 20) + 6, W, screen: true };
     const flash = v.pref('flashes');
     const inMs = 220;
     const outMs = 230;
@@ -452,7 +465,14 @@ export class CutIn {
     }
     const scr = v.renderer.screen;
     const p = typeof v.renderer.worldToScreen === 'function' ? v.renderer.worldToScreen(L.cx, L.y) : { x: L.cx, y: L.y };
-    root.position.set(Math.max(bg.width / 2 + 4, Math.min(scr.width - bg.width / 2 - 4, p.x)), Math.max(bg.height, p.y + L.sq * 0.55));
+    // above the board frame when the slot leaves room for it (the damage numbers of the top row
+    // stay below the frame top), else over the top row; never under the DOM HUD's top panel
+    const z = v.renderer.camera ? v.renderer.camera.zoom || 1 : 1;
+    // (during an Ultimate the UI has faded its HUD away: the whole top of the screen is free)
+    const safeTop = (v._safe && !v._cineOn ? v._safe.y : 0) + bg.height / 2 + 4;
+    let py = p.y - bg.height / 2 - 3;
+    if (py < safeTop) py = Math.max(safeTop, p.y + (L.fw + L.sq * 0.5) * z);
+    root.position.set(Math.max(bg.width / 2 + 4, Math.min(scr.width - bg.width / 2 - 4, p.x)), py);
     v.layers.screenRoot.addChild(root);
     const rec = { root, texs: [tex, jtex].filter(Boolean) };
     this.plates.add(rec);

@@ -27,6 +27,10 @@
   #panel button { font: 500 11px Oswald, sans-serif; color: #ede8ff; background: #1b1238cc; border: 1px solid #3a2a6e; border-radius: 6px; padding: 4px 6px; cursor: pointer; }
   body.nopanel #panel { display: none; }
   body.nohud #ui { display: none; }
+  /* Ultimate cut-in: the HUD panels slide away (what the RPG UI does on view.onCinematic) */
+  #ui > div { transition: opacity .18s ease, transform .18s ease; }
+  body.cinematic .hud-top, body.cinematic .hud-enemy { opacity: 0; transform: translateY(-24px); }
+  body.cinematic .hud-bot { opacity: 0; transform: translateY(40px); }
 </style>
 </head>
 <body>

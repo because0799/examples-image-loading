@@ -55,8 +55,28 @@ class UltCtx {
     return this.v.center(sq, { x: 0, y: 0 });
   }
 
+  /** Start the VFX-phase budget (ms at speed 1): later waits are clipped to what is left. */
+  startBudget(ms) {
+    this.t0 = this.v.clock.now;
+    this.budget = this.v.T(ms);
+  }
+
+  /** Game-time ms left in the budget. */
+  left() {
+    return this.budget == null ? Infinity : this.budget - (this.v.clock.now - this.t0);
+  }
+
+  /** A choreography wait, clipped to the remaining budget (the Ultimate never overruns ≤ 4 s). */
   wait(ms) {
-    return this.v.wait(ms);
+    const want = this.v.T(ms);
+    return this.v.wait(Math.max(16, Math.min(want, this.left())), { raw: true });
+  }
+
+  /** Await an animation, but not past the end of the budget (it keeps fading out on its own). */
+  async until(p) {
+    const room = this.left();
+    if (room <= 16) return;
+    await Promise.race([p, this.v.wait(room, { raw: true })]);
   }
 
   /** World y of the top of the screen above world x (for sky strikes). */
@@ -124,7 +144,42 @@ class UltCtx {
     const v = this.v;
     if (!v.pref('kanji') || !this.fx) return;
     const s = Math.round(this.sq * size * (this.mythic ? 1.2 : 1));
-    this.vx.fxCall('kanji', text, x, y, { size: s, color: color != null ? color : this.el.color, hold: readMs(text, 'kanji', v.settings) * 0.6 });
+    this.vx.fxCall('kanji', text, x, y, { size: s, color: color != null ? color : this.el.color, hold: readMs(text, 'kanji', v.settings) * 0.6, avoid: this._numberZones() });
+  }
+
+  /**
+   * Screen rects the Ultimate's kanji keeps clear of: the column above every target where its
+   * damage numbers rise. Rect objects are reused, so FX's per-frame check allocates nothing.
+   */
+  _numberZones() {
+    if (this._zones) return this._zones.fn;
+    const v = this.v;
+    const sq = this.sq;
+    const pts = [];
+    for (const g of this.groups) {
+      const t = v.piece(g.target);
+      if (t && pts.length < 8) pts.push({ x: t.x, y: t.y });
+    }
+    const rects = pts.map(() => ({ x: 0, y: 0, width: 0, height: 0 }));
+    const q = { x: 0, y: 0 };
+    const fx = this.fx;
+    const r = v.renderer;
+    const fn = () => {
+      const z = r.camera ? (r.camera.zoom || 1) * (r.camera.punchScale || 1) : 1;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        // the target and the column its (stacking) numbers rise into
+        const o = typeof fx._w2s === 'function' ? fx._w2s(p.x, p.y - sq * 1.1, q) : r.worldToScreen(p.x, p.y - sq * 1.1);
+        const R = rects[i];
+        R.width = sq * 3.2 * z;
+        R.height = sq * 3 * z;
+        R.x = o.x - R.width / 2;
+        R.y = o.y - R.height / 2;
+      }
+      return rects;
+    };
+    this._zones = { fn };
+    return fn;
   }
 
   shake(i, ms) {
@@ -176,6 +231,7 @@ export async function playUltimate(view, beat) {
   const total = TL.dim + (withCut ? TL.cutIn : 0) + vfxMs + TL.outro;
 
   // ---------------------------------------------------------------- 0) dim
+  view.emitCinematic(true, { kind: 'ult', unit: caster.id, heroId: caster.heroId });
   if (fx && view.pref('slowmo')) fx.hitStop(90);
   view.dimWorld(0.62, view.T(TL.dim), keep);
   u.vx.fxCall('vignette', el.color, { alpha: 0.42, duration: view.T(total), fade: 260 });
@@ -205,16 +261,20 @@ export async function playUltimate(view, beat) {
 
   // ---------------------------------------------------------------- 2) hero VFX
   const fn = ULTS[caster.heroId] || genericUlt;
+  view._inUlt = true;
+  u.startBudget(vfxMs);
   try {
     await fn(u, vfxMs);
   } finally {
     if (!view.skipping) await u.flush();
+    view._inUlt = false;
   }
   await view.applyEvents(parts.post);
 
   // ---------------------------------------------------------------- 3) outro
   view.dimWorld(0, view.T(TL.outro * 0.8), []);
   view.camReset(TL.outro);
+  view.emitCinematic(false, { kind: 'ult', unit: caster.id, heroId: caster.heroId });
   await view.wait(TL.outro * 0.7);
 }
 
@@ -222,9 +282,9 @@ export async function playUltimate(view, beat) {
 function mythicBurst(u) {
   const c = u.P(u.caster);
   const sq = u.sq;
-  u.vx.fxCall('bloomPulse', 1.1, 700);
+  u.vx.fxCall('bloomPulse', 0.7, 600);
   for (let i = 0; i < 3; i++) {
-    u.vx.pulse('glowRing', u.layers.vfxOver, { x: c.x, y: c.y, tint: iridescent(i), w0: sq * 0.8, w1: sq * (5 + i * 1.5), ms: 700 + i * 120, delay: i * 90, alpha: 0.9 });
+    u.vx.pulse('glowRing', u.layers.vfxOver, { x: c.x, y: c.y, tint: iridescent(i), w0: sq * 0.8, w1: sq * (5 + i * 1.5), ms: 700 + i * 120, delay: i * 90, alpha: 0.6 });
   }
   u.vx.fxCall('rays', c.x, c.y, { color: 0xffe9ff, duration: 1200, size: sq * 7 });
   u.v.sfx('gong', { intensity: 1 });
@@ -236,16 +296,17 @@ function wings(u, piece, ms = 1500, tint = 0xfff6d8) {
   const sq = u.sq;
   const out = [];
   for (const dir of [-1, 1]) {
-    const w = u.sprite('wing', u.layers.vfxUnder, { x: c.x, y: c.y - sq * 0.1, ax: 0.06, ay: 0.94, tint });
+    // under the tokens (additive): the wings glow on the board behind the heroine and never hide a face
+    const w = u.sprite('wing', u.layers.vfxUnder, { x: c.x, y: c.y + sq * 0.1, ax: 0.06, ay: 0.94, tint });
     w.scale.x = 0;
     out.push(w);
     u.vx.run(ms, (e, k) => {
       const open = Ease.outBack(clamp01(k / 0.25));
       const fade = k > 0.8 ? 1 - (k - 0.8) / 0.2 : 1;
-      const W = sq * 2.1 * open;
+      const W = sq * 3.1 * open;
       u.vx.fitW(w, W, W * 0.88);
       w.scale.x *= dir;
-      w.rotation = dir * (0.15 + 0.08 * Math.sin(k * 9));
+      w.rotation = dir * (0.12 + 0.08 * Math.sin(k * 9));
       w.alpha = 0.9 * fade;
     }, { end: () => u.vx.free(w) });
   }
@@ -295,10 +356,9 @@ const ULTS = {
   async liora(u) {
     const c = u.P(u.caster);
     const sq = u.sq;
-    wings(u, u.caster, 1900);
-    u.vx.fxCall('pillar', c.x, c.y, { color: GOLD, width: 1.2 * u.v.k, duration: 1500, godrays: u.fx && u.fx.quality === 'high' });
+    wings(u, u.caster, 1900, 0xffd98a);
+    u.vx.miniPillar(c.x, c.y, GOLD, 1.3);
     u.kanji('光', u.v.layout.cx, u.v.layout.y + sq * 1.2, 1.6, GOLD);
-    u.vx.fxCall('bloomPulse', 0.9, 900);
     u.v.sfx('gong', { intensity: 1 });
     await u.wait(260);
     // golden pillars march outward along both diagonals, one step every 0.1 s
@@ -368,7 +428,7 @@ const ULTS = {
       await u.hit(t);
       stream(u, p, c, { frame: 'spark', tint: 0xb27bff, n: 6, ms: 420 });
     })()));
-    await life;
+    await u.until(life);
   },
 
   // ------------------------------------------------------------------ Legendary
@@ -456,7 +516,7 @@ const ULTS = {
         }
       })(),
     ]);
-    await spread;
+    await u.until(spread);
   },
 
   async vermilia(u) {
@@ -539,7 +599,7 @@ const ULTS = {
       u.vx.slash(p.x, p.y, a, { color: 0x3be3a0, length: 1.9, width: 0.9, duration: 240, flip: i % 2 === 1 });
       u.vx.emit('spark', p.x, p.y, { count: 8, color: 0xd9fff0 });
       u.v.sfx('slash', { intensity: 0.8 });
-      if (u.fx) u.v.fxt(u.fx.comboCounter(i + 1, { color: 0x3be3a0, label: u.v.lang === 'en' ? 'HIT' : 'УДАР' }));
+      if (i >= 1) u.v.combo(i + 1, { color: 0x3be3a0, label: u.v.lang === 'en' ? 'HITS' : 'УДАРОВ', x: p.x });
       if (g) await u.v.applyGroup(g);
       u.shake(0.16, 140);
       await u.wait(i < 5 ? 210 : 120);
@@ -621,7 +681,7 @@ const ULTS = {
       u.vx.fxCall('explosion', p.x, p.y, { color: 0xff5b3a, size: 1.4 * u.v.k });
       u.shake(0.6, 380);
     }
-    await sunLife;
+    await u.until(sunLife);
   },
 
   async volta(u) {
@@ -664,7 +724,7 @@ const ULTS = {
     }
     u.vx.emit('stars', pet.x, pet.y, { count: 8, color: 0xffe14d, radius: 0.4 });
     await u.hitAll({ stagger: 40, fx: false });
-    await life;
+    await u.until(life);
   },
 
   async koyuki(u) {
@@ -738,7 +798,7 @@ const ULTS = {
       await u.v.applyGroup(g);
       await u.wait(90);
     }
-    await life;
+    await u.until(life);
   },
 
   async karasu(u) {
@@ -784,7 +844,7 @@ const ULTS = {
     if (tok && tok.hp <= 0) {
       for (let i = 0; i < u.vx.n(16); i++) u.vx.bits.spawn('feather', u.layers.vfxOverN, { x: p.x, y: p.y, vx: rand(-80, 80), vy: rand(-90, -20), ay: sq * 1.2, size: sq * 0.3, life: rand(0.9, 1.3), tint: 0x1a1020, vr: rand(-5, 5), sway: sq * 0.2 });
     }
-    await life;
+    await u.until(life);
   },
 
   async zlata(u) {

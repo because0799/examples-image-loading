@@ -694,9 +694,11 @@ function sceneTurn() {
 
 function sceneWard() {
   const S0 = mockState('fuyuka');
+  // Ice Bastion raises walls on EMPTY squares next to Fuyuka: give her room on the flank
+  S0.units.find((u) => u.heroId === 'fuyuka').sq = SQ('f4');
   const S = clone(S0);
   const fu = S.units.find((u) => u.heroId === 'fuyuka');
-  const events = abilityEvents(S, fu, HERO_BY_ID.fuyuka.skill, 'skill', SQ('d6'));
+  const events = abilityEvents(S, fu, HERO_BY_ID.fuyuka.skill, 'skill', SQ('g5'));
   const volta = mkUnit('a9', 'volta', 1, SQ('h2'), {});
   S0.units.push(clone(volta));
   S.units.push(volta);
@@ -791,6 +793,18 @@ function boardRect() {
   return { x, y, width: side, height: side };
 }
 
+/** Screen area free of the fake HUD (below the enemy chips, above the action bar). */
+function safeRect() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  if (!P.hud) return { x: 0, y: 0, width: w, height: h };
+  const en = document.querySelector('.hud-enemy');
+  const bot = document.querySelector('.hud-bot');
+  const top = en ? en.getBoundingClientRect().bottom + 4 : 0;
+  const bottom = bot ? bot.getBoundingClientRect().top - 4 : h;
+  return { x: 0, y: top, width: w, height: Math.max(40, bottom - top) };
+}
+
 const renderer = new Renderer(stage);
 let fx = null;
 let view = null;
@@ -875,9 +889,16 @@ function buildPanel() {
   view.show();
   view.setSpeed(P.speed);
   view.setFlipped(P.flipped);
-  view.setBoardRect(boardRect());
+  // like the real HUD integration: the board slot and the screen area between the DOM panels
+  const layoutView = () => {
+    view.setBoardRect(boardRect());
+    view.setSafeRect(safeRect());
+  };
+  layoutView();
   if (P.bg) view.setBackground(`bg-${P.bg}`);
-  window.addEventListener('resize', () => view.setBoardRect(boardRect()));
+  window.addEventListener('resize', layoutView);
+  // the HUD steps aside for Ultimate cut-ins (what the RPG UI does with hud.setCinematic)
+  view.onCinematic((on) => document.body.classList.toggle('cinematic', !!on));
   view.onTap(({ sq, unitId }) => {
     if (view.busy) view.skip();
     else if (unitId) view.highlight({ selected: unitId, moves: [], targets: [sq] });
@@ -892,6 +913,8 @@ function buildPanel() {
     renderer,
     fx,
     scenes: SCENES,
+    /** The scripted { start, events } of a scene (debug / tests). */
+    build: (name) => buildScene(name),
     run,
     reset,
     advance,
@@ -917,6 +940,7 @@ function buildPanel() {
         errors.push(a.map((x) => (x && x.stack ? x.stack.split('\n').slice(0, 2).join(' ') : String(x))).join(' '));
         origErr.apply(console, a);
       };
+      if (name.startsWith('ult-')) await view.splashTexture(name.slice(4)); // measure the cinematic, not the network
       frozen = true;
       renderer.app.ticker.stop();
       let done = false;
@@ -924,9 +948,11 @@ function buildPanel() {
       let ms = 0;
       while (!done && ms < maxMs) {
         await advance(50, 1000 / 60, false);
+        // let macrotasks run too (image loads, timers): the clock is frozen, the page is not
+        await new Promise((r) => setTimeout(r, 0));
         ms += 50;
       }
-      await p.catch(() => {});
+      if (!done) errors.push(`not finished after ${maxMs} ms`);
       // let lingering effects end
       await advance(1500, 1000 / 60, false);
       console.error = origErr;
