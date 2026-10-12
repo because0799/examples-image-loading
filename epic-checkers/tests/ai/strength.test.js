@@ -4,8 +4,7 @@
 //  - level 5 crushes level 1;
 //  - neighbouring levels: the stronger one wins the match, but the weaker one is not helpless —
 //    it takes points off the stronger one (the ladder is a slope, not a wall).
-// The depth-capped levels 1–3 get a generous clock and level 4 a node budget, so every match is
-// deterministic.
+// The depth-capped levels 1–4 get a generous clock, so every match is deterministic.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { E, rng } from './helpers.js';
@@ -88,10 +87,12 @@ for (const id of ['russian', 'turkish', 'english']) {
 }
 
 // Neighbouring levels: [stronger, weaker, openings per variant, lowest / highest expected score].
-// The full ladder measures ~75-90 % per step; small samples get wider bounds.
+// The full ladder measures ~75 / 85 / 87 % for these steps; small samples get wider bounds (the
+// upper bound only demands that the weaker level takes at least a point or two).
 const STEPS = [
   [2, 1, 8, 0.55, 0.95],
   [3, 2, 8, 0.6, 0.97],
+  [4, 3, 8, 0.6, 0.985],
 ];
 
 for (const [hi, lo, pairs, min, max] of STEPS) {
@@ -113,9 +114,3 @@ for (const [hi, lo, pairs, min, max] of STEPS) {
     assert.ok(score <= max, `level ${lo} takes points off level ${hi} (${(score * 100).toFixed(1)} %)`);
   });
 }
-
-test('level 4 beats level 3 (node-limited level 4, russian, 8 games)', () => {
-  const m = match('russian', level(4, { maxNodes: 40000 }), level(3), 4, 31);
-  console.log(`  L4 vs L3: +${m.W} =${m.D} -${m.L} (${m.lines.join(' ')})`);
-  assert.ok(m.score >= 0.6, `${(m.score * 100).toFixed(1)} %`);
-});

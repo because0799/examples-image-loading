@@ -1,0 +1,559 @@
+/* ==========================================================================
+   «Валькирии доски» — summon animation, reveals and the results grid (summon-anim.js).
+   Motion runs on the Web Animations API (finishable on skip); CSS here is layout + looks.
+   ========================================================================== */
+
+.rv-sum {
+  --ra: #4fa3ff;
+  --rb: #bfe0ff;
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  overflow: hidden;
+  pointer-events: auto;
+  background: #05041a;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  cursor: pointer;
+}
+.rv-sum.is-open {
+  opacity: 1;
+}
+.rv-sum.is-closing {
+  opacity: 0;
+  pointer-events: none;
+}
+.rv-sum__sky {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(70% 50% at 50% 30%, rgba(122, 76, 255, 0.45), rgba(122, 76, 255, 0) 70%),
+    radial-gradient(60% 40% at 50% 100%, var(--ra), rgba(0, 0, 0, 0) 70%), linear-gradient(180deg, #0b0828, #05041a);
+  opacity: 0.95;
+}
+.rv-sum--rare .rv-sum__sky {
+  background: radial-gradient(70% 50% at 50% 30%, rgba(80, 120, 255, 0.35), rgba(0, 0, 0, 0) 70%), linear-gradient(180deg, #0b0828, #05041a);
+}
+.rv-sum.is-iris .rv-sum__sky,
+.rv-sum.is-flipped .rv-sum__sky {
+  background: radial-gradient(60% 40% at 30% 30%, rgba(255, 79, 216, 0.5), rgba(0, 0, 0, 0) 70%),
+    radial-gradient(60% 40% at 70% 60%, rgba(106, 240, 255, 0.4), rgba(0, 0, 0, 0) 70%),
+    radial-gradient(60% 50% at 50% 20%, rgba(255, 210, 63, 0.35), rgba(0, 0, 0, 0) 70%), linear-gradient(180deg, #0b0828, #05041a);
+}
+.rv-sum__stage {
+  position: absolute;
+  inset: 0;
+  perspective: 900px;
+}
+.rv-sum__skip {
+  position: absolute;
+  z-index: 10;
+  top: calc(var(--sat) + 10px);
+  right: calc(var(--sar) + 10px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: rgba(8, 5, 28, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.rv-sum__skip .ico svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ---------------------------------------------------------------- the board */
+.rv-sum__boardwrap {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  width: min(76vw, 380px);
+  height: min(76vw, 380px);
+  margin: calc(min(76vw, 380px) / -2) 0 0 calc(min(76vw, 380px) / -2);
+  transform-style: preserve-3d;
+  perspective: 620px;
+  perspective-origin: 50% 20%;
+}
+.rv-sum__board,
+.rv-sum__boardback {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+}
+.rv-sum__board {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+  transform: rotateX(54deg);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 230, 170, 0.6);
+  box-shadow: 0 0 40px rgba(140, 110, 255, 0.45);
+  background: rgba(30, 24, 70, 0.9);
+}
+.rv-sum__board i {
+  display: block;
+  background: rgba(230, 220, 255, 0.1);
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.rv-sum__board i.is-dark {
+  background: rgba(10, 6, 34, 0.85);
+}
+.rv-sum__board i.is-trail {
+  background: var(--tc, var(--ra));
+  box-shadow: 0 0 16px var(--tc, var(--ra)), inset 0 0 10px rgba(255, 255, 255, 0.8);
+}
+.rv-sum__boardback {
+  transform: rotateX(54deg) rotateY(180deg);
+  border-radius: 8px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 40%, #3a1a6e, #05041a 75%);
+  border: 2px solid rgba(255, 200, 255, 0.7);
+}
+.rv-sum.is-flipped .rv-sum__boardwrap {
+  top: 52%;
+}
+
+/* ---------------------------------------------------------------- the crystal */
+.rv-sum__orb {
+  --sz: 40px;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--sz);
+  height: var(--sz);
+  opacity: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff 0%, var(--rb) 25%, var(--ra) 60%, rgba(10, 6, 34, 0.9) 100%);
+  box-shadow: 0 0 24px 6px var(--ra), 0 0 60px 10px rgba(255, 255, 255, 0.25), inset 0 -4px 8px rgba(0, 0, 0, 0.35);
+  will-change: transform;
+}
+.rv-sum.is-iris .rv-sum__orb {
+  background: radial-gradient(circle at 35% 30%, #fff 0%, #ffd23f 25%, #ff4fd8 60%, #3a0a5a 100%);
+  box-shadow: 0 0 26px 8px #ff4fd8, 0 0 70px 14px rgba(106, 240, 255, 0.45);
+}
+.rv-sum__core {
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+}
+.rv-sum__facet {
+  position: absolute;
+  left: 18%;
+  top: 14%;
+  width: 30%;
+  height: 18%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  transform: rotate(-25deg);
+}
+.rv-sum__flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(circle at 50% 40%, #fff 0%, var(--rb) 40%, rgba(255, 255, 255, 0) 80%);
+  pointer-events: none;
+}
+.rv-sum__caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--sat) + 22%);
+  text-align: center;
+  font-family: var(--rv-font-head);
+  font-size: 18px;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.8);
+  opacity: 0;
+}
+.rv-sum__kanji {
+  position: absolute;
+  left: 50%;
+  top: 36%;
+  opacity: 0;
+  font-family: var(--rv-font-jp);
+  font-size: 110px;
+  line-height: 1;
+  white-space: nowrap;
+  color: #fff;
+  text-shadow: 0 0 24px var(--ra), 0 0 50px var(--ra), 0 4px 0 rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.rv-sum--mythic .rv-sum__kanji {
+  background: linear-gradient(180deg, #fff, #ffd23f 40%, #ff4fd8 75%, #6af0ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 0 18px rgba(255, 79, 216, 0.9));
+}
+.rv-sum__shards {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.rv-sum__shards i {
+  position: absolute;
+  left: -7px;
+  top: -10px;
+  width: 14px;
+  height: 20px;
+  clip-path: polygon(50% 0, 100% 40%, 60% 100%, 0 55%);
+  box-shadow: 0 0 10px #fff;
+}
+.rv-sum__ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: 3px solid var(--rb);
+  box-shadow: 0 0 20px var(--ra);
+}
+.rv-sum__pillar {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 140px;
+  height: 100%;
+  opacity: 0;
+  background: linear-gradient(90deg, rgba(255, 230, 150, 0), rgba(255, 245, 210, 0.95) 40%, #fff 50%, rgba(255, 245, 210, 0.95) 60%, rgba(255, 230, 150, 0));
+  pointer-events: none;
+}
+.rv-sum__bolts {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.rv-sum__bolts svg {
+  width: 100%;
+  height: 100%;
+}
+.rv-sum__bolts path {
+  fill: none;
+  stroke: #f0d8ff;
+  stroke-width: 0.8;
+  filter: drop-shadow(0 0 2px #b65cff);
+  vector-effect: non-scaling-stroke;
+}
+.rv-sum__crowns {
+  position: absolute;
+  left: 50%;
+  top: 26%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.rv-sum__crown {
+  position: absolute;
+  left: -30px;
+  top: -30px;
+  color: #ffd23f;
+  filter: drop-shadow(0 0 10px rgba(255, 210, 63, 0.9));
+}
+.rv-sum__crown svg {
+  width: 60px !important;
+  height: 60px !important;
+}
+.rv-sum__crown.is-b {
+  color: #ff8be6;
+  filter: drop-shadow(0 0 10px rgba(255, 79, 216, 0.9));
+}
+.rv-sum__silhouette {
+  position: absolute;
+  left: 0;
+  top: -60px;
+  width: 300px;
+  height: 340px;
+  opacity: 0;
+  -webkit-mask: radial-gradient(ellipse 46% 50% at 50% 42%, #000 55%, transparent 100%);
+  mask: radial-gradient(ellipse 46% 50% at 50% 42%, #000 55%, transparent 100%);
+}
+.rv-sum__shadow {
+  position: absolute !important;
+  inset: 0;
+  background: none !important;
+}
+.rv-sum__shadow::before {
+  display: none !important;
+}
+.rv-sum__shadow .rv-splash__img {
+  object-fit: cover;
+  object-position: 50% 20% !important;
+  filter: grayscale(1) brightness(0.32) contrast(1.8) sepia(0.6) hue-rotate(250deg) saturate(2.2);
+}
+
+/* ---------------------------------------------------------------- reveal */
+.rv-rev {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.rv-rev__rays {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 160vmax;
+  height: 160vmax;
+  margin: -80vmax 0 0 -80vmax;
+  background: repeating-conic-gradient(from 0deg, var(--ra) 0deg 6deg, rgba(0, 0, 0, 0) 6deg 18deg);
+  opacity: 0.22;
+  -webkit-mask: radial-gradient(circle, #000 0%, transparent 60%);
+  mask: radial-gradient(circle, #000 0%, transparent 60%);
+  animation: rvRevRays 6s linear 1 both;
+}
+@keyframes rvRevRays {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(40deg);
+  }
+}
+.rv-rev--mythic .rv-rev__rays {
+  background: repeating-conic-gradient(from 0deg, #ff4fd8 0deg 5deg, rgba(0, 0, 0, 0) 5deg 12deg, #6af0ff 12deg 17deg, rgba(0, 0, 0, 0) 17deg 24deg, #ffd23f 24deg 29deg, rgba(0, 0, 0, 0) 29deg 36deg);
+  opacity: 0.3;
+}
+.rv-rev__art {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--sat) + 6%);
+  bottom: 30%;
+}
+.rv-rev__splash {
+  position: absolute !important;
+  inset: 0;
+  background: none !important;
+}
+.rv-rev__splash::before {
+  display: none !important;
+}
+.rv-rev__splash .rv-splash__img {
+  -webkit-mask: linear-gradient(180deg, transparent 0%, #000 12%, #000 72%, transparent 100%);
+  mask: linear-gradient(180deg, transparent 0%, #000 12%, #000 72%, transparent 100%);
+}
+.rv-rev.is-quick .rv-rev__art {
+  top: 18%;
+  bottom: 38%;
+}
+.rv-rev__shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(5, 4, 26, 0) 50%, rgba(5, 4, 26, 0.92) 78%);
+  pointer-events: none;
+}
+.rv-rev__jp {
+  position: absolute;
+  right: calc(var(--sar) + 10px);
+  top: calc(var(--sat) + 70px);
+  writing-mode: vertical-rl;
+  font-family: var(--rv-font-jp);
+  font-size: 46px;
+  line-height: 1;
+  color: #fff;
+  text-shadow: 0 0 18px var(--ra), 0 3px 0 rgba(0, 0, 0, 0.6);
+}
+.rv-rev__info {
+  position: absolute;
+  left: calc(var(--sal) + 18px);
+  right: calc(var(--sar) + 18px);
+  bottom: calc(var(--sab) + 70px);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.rv-rev__rar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rb);
+}
+.rv-rev__rar .ico svg {
+  width: 22px;
+  height: 22px;
+}
+.rv-rev__name {
+  max-width: 100%;
+  font-family: var(--rv-font-head);
+  font-size: 46px;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #fff;
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.55), 0 0 26px var(--ra);
+}
+.rv-rev--mythic .rv-rev__name {
+  background: linear-gradient(180deg, #fff 30%, #ffe6a6 60%, #ff9be8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 3px 0 rgba(60, 10, 70, 0.8)) drop-shadow(0 0 16px rgba(255, 79, 216, 0.7));
+}
+.rv-rev__title {
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--rv-gold);
+}
+.rv-rev__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 4px;
+}
+.rv-rev__new,
+.rv-rev__dup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.rv-rev__new {
+  background: linear-gradient(90deg, #ff4d6d, #ffb347);
+  color: #fff;
+  box-shadow: 0 0 16px rgba(255, 120, 90, 0.6);
+}
+.rv-rev__dup {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+.rv-rev__dup .ico svg {
+  width: 15px;
+  height: 15px;
+}
+.rv-rev__line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--ra);
+  background: linear-gradient(90deg, rgba(8, 5, 28, 0.85), rgba(8, 5, 28, 0));
+}
+.rv-rev__linejp {
+  font-family: var(--rv-font-jp);
+  font-size: 15px;
+  color: #fff;
+}
+.rv-rev__linesub {
+  font-size: 13.5px;
+  color: var(--rv-muted);
+}
+.rv-rev__count {
+  position: absolute;
+  left: calc(var(--sal) + 14px);
+  top: calc(var(--sat) + 18px);
+  font: 700 13px/1 var(--rv-font-num);
+  color: rgba(255, 255, 255, 0.6);
+}
+.rv-rev__tap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--sab) + 26px);
+  text-align: center;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ---------------------------------------------------------------- results grid */
+.rv-sum.is-grid {
+  cursor: default;
+}
+.rv-sum__grid {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: calc(var(--sat) + 20px) calc(var(--sar) + 14px) calc(var(--sab) + 20px) calc(var(--sal) + 14px);
+  overflow-y: auto;
+}
+.rv-sum__gridtitle {
+  font-family: var(--rv-font-head);
+  font-size: 22px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.rv-sum__cards {
+  width: 100%;
+  max-width: 520px;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+  justify-content: center;
+  gap: 8px;
+  perspective: 800px;
+}
+.rv-sum__cards:not(.is-ten) {
+  --cols: 1;
+  max-width: 180px;
+}
+.rv-sum__cards.is-ten {
+  --cols: 5;
+}
+.rv-sum__cell {
+  position: relative;
+  transform-style: preserve-3d;
+}
+.rv-sum__cardback {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: linear-gradient(160deg, #3a2c9a, #160e40);
+  border: 1px solid rgba(255, 230, 170, 0.5);
+  transform: rotateY(180deg);
+  backface-visibility: hidden;
+  color: var(--rv-gold);
+  font-size: 24px;
+}
+.rv-sum__cell .rv-card {
+  backface-visibility: hidden;
+}
+.rv-sum__card.is-new {
+  box-shadow: 0 0 0 2px #fff, 0 0 16px rgba(255, 255, 255, 0.4);
+}
+.rv-sum__cur {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 700 15px/1 var(--rv-font-num);
+}
+.rv-sum__cur .ico {
+  color: var(--rv-cyan);
+}
+.rv-sum__btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+  max-width: 420px;
+}

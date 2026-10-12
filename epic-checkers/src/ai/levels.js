@@ -60,12 +60,19 @@ export const AI_LEVELS = Object.freeze([
 ]);
 
 /**
- * Search parameters per level. The ladder is meant to feel human: levels 1–3 are depth-capped
+ * Search parameters per level. The ladder is meant to feel human: levels 1–4 are depth-capped
  * searches that score every root move exactly (multiPV) and then choose with a human-error
  * model — a beginner who sometimes just moves something, a casual player who does not see the
  * opponent's shots coming, a club player who now and then trusts a first impression instead of
- * calculating. Levels 4 and 5 are full time-limited searches (0.8 s and 2.5 s) whose only
- * imprecision is a tiny evaluation jitter.
+ * calculating, a strong player who calculates six plies and only rarely plays on intuition.
+ * Level 5 is the full-strength time-limited search (unchanged).
+ *
+ * Calibration (AI-vs-AI, balanced random openings, both colours, Russian / Turkish / English /
+ * International): level k+1 scores 75 / 85 / 87 % against level k for k = 1..3, level 5 ~99 %
+ * against level 4 and 100 % against level 1 (giveaway: 91 / 78 / 70 / 81 %). The steep step is
+ * the one into the full-strength maximum: a level 4 that searches 0.8 s at full strength
+ * (multiPV: false, maxDepth: 60, glance: 0, noise: 0, timeMs: 800) scores ~98 % against level 3
+ * and ~68 % against level 5 instead — then the cliff sits between levels 3 and 4.
  *
  *  timeMs        default thinking time (for the depth-capped levels only a safety cap)
  *  maxDepth      iterative-deepening cap (plies, before extensions)
@@ -117,7 +124,8 @@ export const LEVEL_PARAMS = Object.freeze({
   }),
   4: Object.freeze({
     ...NO_ERRORS,
-    timeMs: 800, maxDepth: 60, multiPV: false, qMax: Infinity, noise: 0, jitter: 4,
+    timeMs: 1500, maxDepth: 6, multiPV: true, qMax: Infinity, noise: 5, jitter: 5,
+    glance: 0.15, glanceDepth: 2, glanceMaxLoss: 300,
     threatExt: 1, lmr: true, contempt: 20,
     giveaway: Object.freeze({}),
   }),

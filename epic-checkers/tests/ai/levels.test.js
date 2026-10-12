@@ -1,7 +1,7 @@
 // The human-like levels (levels.js LEVEL_PARAMS + search.js chooseHumanMove): every kind of error
 // happens at about the rate the level asks for and stays within its bounds, the beginner's random
 // moves are "safe", the casual level does not see an opponent's 2-for-1 shot coming while the
-// club level does, the full-strength levels 4–5 do not use the error model, and the deliberately blind
+// club level does, level 4 errs rarely and level 5 (full strength) never, and the deliberately blind
 // scores of a weak level never leak into a full-strength search through the shared table.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -67,16 +67,21 @@ test('level 3: often trusts a first impression (glance rate); notices a refuted 
   assert.equal(tally(byDepth, 4, calc, 6).share([0]), 1);
 });
 
-test('levels 4–5 are full searches without the error model, only a tiny evaluation jitter', () => {
-  for (const l of [4, 5]) {
-    const p = levelParams(l);
-    for (const k of ['random', 'glance', 'slip', 'noise']) assert.equal(p[k], 0, `level ${l} ${k}`);
-    assert.equal(p.multiPV, false);
-    assert.ok(p.jitter > 0 && p.jitter <= 5 && p.jitter < levelParams(3).jitter);
-    const t = tally([, GLANCE, DEEP, DEEP, DEEP], 4, p, 7);
-    assert.equal(t.share([0]), 1);
-  }
-  assert.ok(LEVEL_PARAMS[4].timeMs < LEVEL_PARAMS[5].timeMs);
+test('level 4 errs rarely and less than level 3, level 5 never', () => {
+  const p3 = levelParams(3);
+  const p4 = levelParams(4);
+  assert.ok(p4.glance < p3.glance && p4.glanceDepth > p3.glanceDepth && p4.noise < p3.noise && p4.jitter < p3.jitter);
+  assert.equal(p4.random + p4.slip, 0);
+  // the first impression of level 4 is a 2-ply look; it differs from the 6-ply best move here
+  const t4 = tally([, GLANCE, GLANCE, DEEP, DEEP, DEEP, DEEP], 6, p4, 8);
+  assert.ok(Math.abs(t4.rate('glance') - p4.glance) < 0.03, `level 4 glance ${t4.rate('glance')}`);
+  assert.ok(t4.share([0]) > 0.7 && t4.share([3, 4, 5]) === 0, `level 4 best move ${t4.share([0])}`);
+  const p5 = levelParams(5);
+  for (const k of ['random', 'glance', 'slip', 'noise']) assert.equal(p5[k], 0, `level 5 ${k}`);
+  assert.equal(p5.multiPV, false, 'level 5: the full time-limited search');
+  assert.ok(p5.jitter > 0 && p5.jitter <= 5);
+  const t5 = tally([, GLANCE, DEEP, DEEP, DEEP], 4, p5, 7);
+  assert.equal(t5.share([0]), 1);
   // the depth caps grow with the level; levels 1–2 do not follow capture sequences to the end
   const depth = [1, 2, 3, 4, 5].map((l) => LEVEL_PARAMS[l].maxDepth);
   for (let i = 1; i < 5; i++) assert.ok(depth[i] > depth[i - 1] || depth[i] === 60, `level ${i + 1} depth`);
@@ -140,9 +145,8 @@ function errorRates(level, extra = {}) {
 
 test('error rates on real positions: suboptimal moves become rarer with every level', () => {
   const rates = {};
-  for (const level of [1, 2, 3]) rates[level] = errorRates(level);
-  // level 4 thinks ~0.8 s; a node budget keeps this test short (the rate does not depend on it)
-  rates[4] = errorRates(4, { maxNodes: 30000 });
+  for (const level of [1, 2, 3, 4]) rates[level] = errorRates(level);
+  // level 5 thinks 2.5 s; a node budget keeps this test short (it never chooses a worse move)
   rates[5] = errorRates(5, { maxNodes: 30000 });
   console.log(
     `  moves worse than the level's own best by ≥ 0.15 / ≥ 0.9 man: ${[1, 2, 3, 4, 5]
@@ -154,7 +158,7 @@ test('error rates on real positions: suboptimal moves become rarer with every le
   assert.ok(rates[2].small >= 0.04 && rates[2].small <= 0.25, 'level 2: ~15 % slips (some within 0.15 man)');
   assert.ok(rates[2].big <= 0.03, 'level 2: its slips are small by its own judgement');
   assert.ok(rates[3].small >= 0.03 && rates[3].small <= 0.2, 'level 3: occasional inaccuracies');
-  assert.equal(rates[4].small, 0, 'level 4: none (full search)');
+  assert.ok(rates[4].small <= Math.min(0.08, rates[3].small), 'level 4: rarer');
   assert.equal(rates[5].small, 0, 'level 5: none');
 });
 
@@ -172,7 +176,7 @@ for (const [id, pos, blunder] of SHOT_COMING) {
     const s = E.stateFromString(id, pos);
     const path = E.findMove(E.legalMoves(s), E.parseMove(id, blunder)).path;
     for (const level of [1, 2, 3, 4, 5]) {
-      const r = search(s, { level, allScores: true, timeMs: 60000, maxDepth: level >= 4 ? 7 : undefined, seed: 1, newGame: true });
+      const r = search(s, { level, allScores: true, timeMs: 60000, maxDepth: level === 5 ? 7 : undefined, seed: 1, newGame: true });
       const best = r.scores[0].score;
       const mine = r.scores.find((x) => JSON.stringify(x.path) === JSON.stringify(path)).score;
       if (level <= 2) assert.ok(best - mine <= 40, `level ${level} sees nothing wrong with ${blunder} (${mine} vs ${best})`);

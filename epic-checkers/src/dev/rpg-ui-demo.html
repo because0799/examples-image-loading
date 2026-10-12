@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#05041a">
+  <title>RPG UI demo — Валькирии доски</title>
+  <link rel="stylesheet" href="fonts.css">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #05041a;
+      -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; touch-action: none; overscroll-behavior: none; }
+    #stage, #ui { position: fixed; inset: 0; }
+    #stage { z-index: 0; overflow: hidden; background: radial-gradient(80% 50% at 50% 40%, #2a1d6e, #07051a 75%); }
+    #stage img.bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .55; }
+    #board { position: absolute; }
+    #ui { z-index: 10; pointer-events: none; }
+    #devlog { position: fixed; z-index: 100; left: 4px; bottom: 4px; max-width: 60%; font: 10px/1.2 monospace; color: #9f9; pointer-events: none; white-space: pre; opacity: .8; display: none; }
+  </style>
+</head>
+<body>
+  <div id="stage"><img class="bg" alt="" hidden><canvas id="board"></canvas></div>
+  <div id="ui"></div>
+  <div id="devlog"></div>
+  <script src="app.js"></script>
+</body>
+</html>

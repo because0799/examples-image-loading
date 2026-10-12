@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>rpg-voice-demo — Валькирии доски: голос и арт</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  :root { --bg: #07040f; --bg2: #140b2c; --panel: #120c26; --line: #2d2160; --txt: #ede8ff; --dim: #9a92b8;
+    --cyan: #29e6ff; --gold: #ffd23f; --red: #ff2e63; --rare: #4da3ff; --epic: #b46bff; --legendary: #ffc94d; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: linear-gradient(180deg, var(--bg), var(--bg2)) fixed; color: var(--txt);
+    font-family: Oswald, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
+  body { padding: 10px 10px 48px; }
+  h1 { font: 400 20px 'Dela Gothic One', sans-serif; margin: 2px 0; letter-spacing: .5px;
+    background: linear-gradient(90deg, var(--cyan), var(--gold), var(--red)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { color: var(--dim); font-size: 12px; margin-bottom: 8px; }
+  h2 { font: 400 14px 'Russo One', sans-serif; margin: 14px 0 6px; color: var(--gold); text-transform: uppercase; letter-spacing: 1px; }
+  button { font: 500 13px Oswald, sans-serif; color: var(--txt); background: #1b1238; border: 1px solid #3a2a6e; border-radius: 8px;
+    padding: 8px 6px; cursor: pointer; touch-action: manipulation; }
+  button:active { transform: scale(.96); }
+  button:disabled { opacity: .3; cursor: default; }
+  button.on { background: var(--cyan); color: #000; border-color: var(--cyan); }
+  button.playing { background: var(--gold); color: #000; border-color: var(--gold); }
+  .controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; font-size: 13px; color: var(--dim); }
+  .row input[type=range] { flex: 1; accent-color: var(--cyan); }
+  .row output { width: 36px; text-align: right; color: var(--txt); }
+  .row label.chk { display: flex; align-items: center; gap: 4px; }
+  .tabs { display: flex; gap: 6px; margin: 12px 0 4px; }
+  .tabs button { flex: 1; }
+  /* now playing */
+  #now { display: grid; grid-template-columns: 72px 1fr; gap: 10px; align-items: center; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-top: 10px; min-height: 96px; }
+  #now .tok { width: 72px; height: 72px; }
+  #now .name { font: 400 15px 'Russo One', sans-serif; }
+  #now .jp { font: 400 17px 'Dela Gothic One', sans-serif; margin: 3px 0; color: #fff; text-shadow: 0 0 8px rgba(41, 230, 255, .5); }
+  #now .tr { font-size: 12px; color: var(--dim); }
+  #now .bar { height: 3px; background: #241a48; border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  #now .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--cyan), var(--gold)); }
+  #status { font-size: 12px; color: var(--dim); min-height: 16px; margin-top: 4px; }
+  /* tokens */
+  .tok { position: relative; border-radius: 50%; overflow: hidden; flex: none; box-shadow: 0 0 0 3px var(--ring, var(--rare)), 0 0 12px var(--ring, var(--rare)); }
+  .tok img { width: 100%; height: 100%; display: block; }
+  .tok.mythic { --ring: #ff7ad9; box-shadow: 0 0 0 3px transparent, 0 0 14px #9cf; background: conic-gradient(#ff7ad9, #7af0ff, #ffe27a, #b07aff, #ff7ad9); padding: 3px; }
+  .tok.mythic img { border-radius: 50%; }
+  .tok.legendary { --ring: var(--legendary); } .tok.epic { --ring: var(--epic); } .tok.rare { --ring: var(--rare); }
+  /* voiced heroes */
+  #heroes { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .hero { display: grid; grid-template-columns: 56px 1fr; gap: 10px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+  .hero .tok { width: 56px; height: 56px; }
+  .hero .nm { font: 400 14px 'Russo One', sans-serif; margin-bottom: 4px; }
+  .hero .nm small { font: 500 11px Oswald, sans-serif; color: var(--dim); margin-left: 4px; }
+  .hero .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .hero .btns button { padding: 6px 2px; font-size: 12px; }
+  /* gallery */
+  #gallery { display: none; }
+  .gal { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .gcell { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px; text-align: center; font-size: 12px; }
+  .gcell .card { width: 100%; aspect-ratio: 3 / 4; border-radius: 8px; display: block; object-fit: cover; background: #000; }
+  .gcell .tok { width: 54px; height: 54px; margin: -27px auto 2px; }
+  .gcell .sp { position: relative; margin-top: 4px; }
+  .gcell .sp img { width: 100%; display: block; border-radius: 4px; }
+  .gcell .sp i { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; border: 2px solid var(--red); }
+  .bgs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .bgs figure { margin: 0; font-size: 11px; color: var(--dim); text-align: center; }
+  .bgs img { width: 100%; display: block; border-radius: 6px; }
+  #log { font: 11px/1.45 ui-monospace, monospace; color: var(--dim); white-space: pre-wrap; background: #05030b; border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px; max-height: 160px; overflow: auto; }
+  #log b { color: var(--cyan); font-weight: 400; } #log em { color: var(--red); font-style: normal; }
+</style>
+</head>
+<body>
+  <h1>ВАЛЬКИРИИ ДОСКИ · 盤上戦姫</h1>
+  <div class="sub" id="stats">голос и арт</div>
+
+  <div class="controls">
+    <button id="bVoice" class="on">Голос: вкл</button>
+    <button id="bMute">Звук: вкл</button>
+    <button id="bMusic">Музыка</button>
+    <button id="bStop">Стоп</button>
+  </div>
+  <div class="row"><span>Громкость голоса</span><input id="vol" type="range" min="0" max="1" step="0.05" value="0.9"><output id="volOut">0.90</output></div>
+  <div class="row">
+    <label class="chk"><input id="force" type="checkbox"> force</label>
+    <button id="bSpam" style="flex:1">Спам-тест ×6</button>
+    <button id="bAll" style="flex:1">Все реплики</button>
+  </div>
+
+  <div id="now"><div class="tok rare"><img alt=""></div><div><div class="name">—</div><div class="jp">タップしてね</div><div class="tr">Нажмите кнопку реплики · tap a line</div><div class="bar"><i></i></div></div></div>
+  <div id="status"></div>
+
+  <div class="tabs"><button id="tVoice" class="on">Озвучка</button><button id="tGallery">Галерея арта</button></div>
+
+  <section id="voice">
+    <h2>Озвученные героини</h2>
+    <div id="heroes"></div>
+  </section>
+
+  <section id="gallery">
+    <h2>Карточки, жетоны, сплэши (точка = focal)</h2>
+    <div class="gal" id="gal"></div>
+    <h2>Фоны и ключевой арт</h2>
+    <div class="bgs" id="bgs"></div>
+  </section>
+
+  <h2>Журнал</h2>
+  <div id="log"></div>
+  <script src="app.js"></script>
+</body>
+</html>

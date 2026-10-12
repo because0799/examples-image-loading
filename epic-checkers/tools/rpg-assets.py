@@ -7,6 +7,8 @@
     python3 tools/rpg-assets.py --debug-sheet out.png   # splashes with face / token / card rectangles
     python3 tools/rpg-assets.py --check         # validate crops.json + sources, write nothing
     python3 tools/rpg-assets.py --prune         # also delete shipped files that have no source any more
+    python3 tools/rpg-assets.py --stamp liora   # after re-checking a changed image: record its new hash
+    python3 tools/rpg-assets.py --voice-kbps 0  # ship the voice mp3s as they are (only tags stripped)
 
 Sources (assets/rpg/, see docs/RPG-ARCHITECTURE.md):
     heroes/<id>.png              1280x720 hero art (one per hero)
@@ -21,23 +23,30 @@ Outputs (web/static/rpg/, copied into dist/www/rpg/ by tools/build-web.mjs):
     token/<id>.webp   256x256    square face crop centred on crops.json "face" (circle mask at render time)
     bg/<bg-id>.webp   1280x720
     keyart.webp       1280x720   only when the source exists
-    voice/<heroId>-<event>.mp3   byte copies of the voice files that exist (others are simply absent)
+    voice/<heroId>-<event>.mp3   the voice files that exist (others are simply absent), re-encoded to
+                      64 kbps mono MP3 with ffmpeg when it is installed (speech stays clean, half the
+                      size of the 128 kbps sources) and normalised to -16 LUFS (the generated lines
+                      range from -32 to -14 LUFS); without ffmpeg (or --voice-kbps 0) the audio
+                      frames are copied byte for byte and only the ID3 tags are dropped
 
 It also regenerates the block between the @generated markers in src/rpg/assets.js (focal points,
 list of shipped voice files, keyart flag) so RPG_ASSETS.voice() can answer null synchronously for
 lines that are not shipped, and mirrors web/static/rpg into dist/dev/rpg/ (when dist/ exists) so the
 RPG demo pages in dist/dev/<demo>/ can load the art with setRpgAssetBase('../').
 
-Re-running is idempotent: the WebP encoder is deterministic, so unchanged inputs give identical bytes.
-Requires Python 3.8+ and Pillow with WebP support.
+Re-running is idempotent: the WebP encoder (and ffmpeg with bitexact flags) is deterministic, so
+unchanged inputs give identical bytes. Requires Python 3.8+ and Pillow with WebP support; ffmpeg is
+optional.
 """
 
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 
 try:
@@ -139,12 +148,47 @@ def roster_from_heroes_js():
     return out
 
 
-def load_crops():
+def load_crops_doc():
     if not os.path.exists(CROPS_FILE):
-        return {}
+        return {'version': 1, 'source': {'width': SRC_W, 'height': SRC_H}, 'heroes': {}}
     with open(CROPS_FILE, encoding='utf-8') as f:
         doc = json.load(f)
-    return doc.get('heroes', {})
+    doc.setdefault('heroes', {})
+    return doc
+
+
+def write_crops_doc(doc):
+    """crops.json with one line per hero (diff-friendly)."""
+    out = ['{']
+    for key in [k for k in doc if k != 'heroes']:
+        val = doc[key]
+        if isinstance(val, list) and val and all(isinstance(v, str) for v in val):
+            lines = ',\n'.join('    ' + json.dumps(v, ensure_ascii=False) for v in val)
+            out.append(f'  {json.dumps(key)}: [\n{lines}\n  ],')
+        else:
+            out.append(f'  {json.dumps(key)}: {json.dumps(val, ensure_ascii=False)},')
+    out.append('  "heroes": {')
+    ids = list(doc['heroes'])
+    width = max((len(h) for h in ids), default=0) + 3
+    for i, hid in enumerate(ids):
+        e = doc['heroes'][hid]
+        order = ['face', 'token', 'card', 'src'] + [k for k in e if k not in ('face', 'token', 'card', 'src')]
+        body = ', '.join(f'{json.dumps(k)}: {json.dumps(e[k], ensure_ascii=False)}' for k in order if k in e)
+        out.append(f'    {(json.dumps(hid) + ":").ljust(width)} {{ {body} }}{"," if i < len(ids) - 1 else ""}')
+    out.append('  }')
+    out.append('}')
+    tmp = CROPS_FILE + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(out) + '\n')
+    os.replace(tmp, CROPS_FILE)
+
+
+def file_sha(path):
+    h = hashlib.sha1()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()[:12]
 
 
 def resolve_crop(hid, entry, expected_focal):
@@ -167,8 +211,9 @@ def resolve_crop(hid, entry, expected_focal):
     size = max(64, min(size, SRC_H))
     tx = min(max(tcx - size // 2, 0), SRC_W - size)
     ty = min(max(tcy - size // 2, 0), SRC_H - size)
-    if (tx + size // 2, ty + size // 2) != (tcx, tcy):
-        problems.append('token square was clamped to the frame, the face is off-centre in the token')
+    shift = max(abs(tx + size // 2 - tcx), abs(ty + size // 2 - tcy))
+    if shift > size * 0.04:  # a few px at the frame edge are invisible; more means a bad crop
+        problems.append(f'token square was clamped to the frame by {shift}px, the face is off-centre in the token')
     token = (tx, ty, size, size)
 
     card = entry.get('card')
@@ -210,6 +255,95 @@ def build_plain(job):
     """Worker: one full-frame image (background / key art)."""
     img = load_rgb(job['src'])
     return job['name'], save_webp(cover(img, job['size']), job['out'], job['quality'])
+
+
+# ------------------------------------------------------------------------------------ voice
+
+def strip_id3(data):
+    """MP3 bytes without the leading ID3v2 tag(s) and the trailing ID3v1 tag (audio frames untouched)."""
+    start = 0
+    while data[start:start + 3] == b'ID3' and len(data) >= start + 10:
+        flags = data[start + 5]
+        s = data[start + 6:start + 10]
+        if any(b & 0x80 for b in s):
+            break  # not a valid synch-safe size: leave the data alone
+        size = (s[0] << 21) | (s[1] << 14) | (s[2] << 7) | s[3]
+        start += 10 + size + (10 if flags & 0x10 else 0)  # footer present
+    end = len(data)
+    if end - start > 128 and data[end - 128:end - 125] == b'TAG':
+        end -= 128
+    body = data[start:end]
+    # sanity: the remaining stream must start with an MPEG frame sync
+    if len(body) < 4 or body[0] != 0xFF or (body[1] & 0xE0) != 0xE0:
+        return data
+    return body
+
+
+def have_ffmpeg():
+    return shutil.which('ffmpeg') is not None
+
+
+def measure_lufs(src):
+    """Integrated loudness (EBU R128) of an audio file in LUFS, or None."""
+    try:
+        r = subprocess.run(['ffmpeg', '-hide_banner', '-nostats', '-i', src, '-af', 'ebur128=framelog=quiet', '-f', 'null', '-'],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.findall(r'^\s*I:\s*(-?[0-9.]+|-inf)\s*LUFS', r.stderr.decode(errors='replace'), re.M)
+    if not m or m[-1] == '-inf':
+        return None
+    return float(m[-1])
+
+
+VOICE_PEAK = 0.84  # limiter ceiling, ≈ −1.5 dBFS (headroom for MP3 overshoot)
+VOICE_GAIN_RANGE = (-12.0, 16.0)  # never boost the noise floor of a whisper by more than this
+
+
+def encode_voice(src, dst, kbps, lufs=None):
+    """Re-encodes one voice line to `kbps` CBR mono MP3 (44.1 kHz, no tags, bitexact). With `lufs`, the
+    line is first brought to that integrated loudness (static gain + a transparent peak limiter), so
+    soft-spoken and shouting heroes play at the same perceived volume. Returns True on success."""
+    tmp = dst + '.tmp.mp3'
+    filters = []
+    if lufs is not None:
+        measured = measure_lufs(src)
+        if measured is not None:
+            gain = min(max(lufs - measured, VOICE_GAIN_RANGE[0]), VOICE_GAIN_RANGE[1])
+            filters.append(f'volume={gain:.2f}dB')
+            filters.append(f'alimiter=limit={VOICE_PEAK}:attack=5:release=60:level=0')
+    cmd = ['ffmpeg', '-v', 'error', '-y', '-i', src, '-map', '0:a:0', '-map_metadata', '-1']
+    if filters:
+        cmd += ['-af', ','.join(filters)]
+    cmd += ['-ac', '1', '-ar', '44100', '-c:a', 'libmp3lame', '-b:a', f'{kbps}k',
+            '-fflags', '+bitexact', '-flags:a', '+bitexact', '-id3v2_version', '0', '-write_id3v1', '0', tmp]
+    try:
+        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        warn(f'ffmpeg failed on {rel(src)}: {e}')
+        return False
+    if r.returncode != 0 or not os.path.exists(tmp) or os.path.getsize(tmp) < 512:
+        warn(f'ffmpeg failed on {rel(src)}: {r.stderr.decode(errors="replace").strip()[:200]}')
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        return False
+    os.replace(tmp, dst)
+    return True
+
+
+def ship_voice(src, dst, kbps, lufs=None):
+    """One voice line -> web/static/rpg/voice/. Returns 'encoded' | 'copied' | 'unchanged'."""
+    if kbps and have_ffmpeg():
+        before = open(dst, 'rb').read() if os.path.exists(dst) else None
+        if encode_voice(src, dst, kbps, lufs):
+            return 'unchanged' if before == open(dst, 'rb').read() else 'encoded'
+    data = strip_id3(open(src, 'rb').read())
+    if os.path.exists(dst) and open(dst, 'rb').read() == data:
+        return 'unchanged'
+    with open(dst + '.tmp', 'wb') as f:
+        f.write(data)
+    os.replace(dst + '.tmp', dst)
+    return 'copied'
 
 
 # ------------------------------------------------------------------------------------ manifest
@@ -280,7 +414,7 @@ def contact_sheet(ids, path, cols=6):
         card_p, tok_p = os.path.join(OUT, 'card', hid + '.webp'), os.path.join(OUT, 'token', hid + '.webp')
         if os.path.exists(card_p):
             sheet.paste(load_rgb(card_p).resize((card_w, card_h), Image.LANCZOS), (ox, oy))
-            # card thirds guide: the face should sit on the upper third line
+            # upper-third tick: the face should sit above it (upper fifth of the card)
             d.line([(ox, oy + card_h // 3), (ox + 8, oy + card_h // 3)], fill=(255, 210, 63), width=2)
         if os.path.exists(tok_p):
             t = load_rgb(tok_p).resize((tok, tok), Image.LANCZOS)
@@ -324,14 +458,14 @@ def debug_sheet(jobs, path, cols=4):
 def list_files(d, ext):
     if not os.path.isdir(d):
         return []
-    return sorted(f for f in os.listdir(d) if f.endswith(ext) and not f.startswith('.'))
+    return sorted(f for f in os.listdir(d) if f.endswith(ext) and not f.startswith('.') and '.tmp' not in f)
 
 
 def dir_size(d):
     total, n = 0, 0
     for base, _, files in os.walk(d):
         for f in files:
-            if f.endswith('.tmp'):
+            if '.tmp' in f:
                 continue
             total += os.path.getsize(os.path.join(base, f))
             n += 1
@@ -358,6 +492,13 @@ def main(argv=None):
     ap.add_argument('--debug-sheet', help='write the sources with face/token/card rectangles to this PNG')
     ap.add_argument('--check', action='store_true', help='validate crops.json and sources only; write nothing')
     ap.add_argument('--prune', action='store_true', help='delete shipped files whose source is gone')
+    ap.add_argument('--stamp', action='append', metavar='ID',
+                    help="record the current source hash of these heroes in crops.json ('all' = every hero) "
+                         'after re-checking their crops')
+    ap.add_argument('--voice-kbps', type=int, default=64,
+                    help='re-encode voice to this CBR mono MP3 bitrate with ffmpeg (0 = copy the audio frames)')
+    ap.add_argument('--voice-lufs', type=float, default=-16.0,
+                    help='loudness target of the re-encoded voice in LUFS (0 = keep the source loudness)')
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 2, help='parallel encoders')
     args = ap.parse_args(argv)
 
@@ -366,7 +507,8 @@ def main(argv=None):
 
     parts = set(args.only or ['heroes', 'bg', 'keyart', 'voice'])
     roster = roster_from_heroes_js()
-    crops = load_crops()
+    crops_doc = load_crops_doc()
+    crops = crops_doc['heroes']
     hero_pngs = {f[:-4] for f in list_files(os.path.join(SRC, 'heroes'), '.png')}
     ids = sorted(set(roster) | set(crops) | hero_pngs, key=lambda h: (list(roster).index(h) if h in roster else 999, h))
     errors = 0
@@ -374,6 +516,7 @@ def main(argv=None):
     # ---- validate
     jobs = []
     focal = {}
+    stamped = []
     for hid in ids:
         if roster and hid not in roster:
             warn(f'{hid}: art / crop exists but the hero is not in heroes.js')
@@ -386,7 +529,17 @@ def main(argv=None):
             errors += 1
         focal[hid] = crop['face']
         if hid in hero_pngs:
-            jobs.append({'id': hid, 'src': os.path.join(SRC, 'heroes', hid + '.png'), 'crop': crop})
+            src = os.path.join(SRC, 'heroes', hid + '.png')
+            jobs.append({'id': hid, 'src': src, 'crop': crop})
+            if hid in crops:
+                sha = file_sha(src)
+                if args.stamp and ('all' in args.stamp or hid in args.stamp):
+                    if crops[hid].get('src') != sha:
+                        crops[hid]['src'] = sha
+                        stamped.append(hid)
+                elif crops[hid].get('src') and crops[hid]['src'] != sha:
+                    warn(f'{hid}: heroes/{hid}.png changed since its crop was measured - re-check face/card '
+                         f'(--debug-sheet / --sheet), then --stamp {hid}')
         elif hid in roster:
             warn(f'{hid}: no source art (assets/rpg/heroes/{hid}.png)')
             errors += 1
@@ -401,6 +554,14 @@ def main(argv=None):
             warn(f'voice/{f}: suspiciously small ({os.path.getsize(os.path.join(SRC, "voice", f))} B), skipped')
             continue
         voice_src.append(f)
+
+    if args.stamp:
+        unknown = [h for h in args.stamp if h != 'all' and h not in crops]
+        for h in unknown:
+            warn(f'--stamp {h}: no such hero in crops.json')
+        if stamped:
+            write_crops_doc(crops_doc)
+        print(f'stamped: {", ".join(stamped) if stamped else "nothing changed"}')
 
     if args.check:
         print(f'rpg-assets: {len(jobs)} hero sources, {len(voice_src)} voice files, {errors} error(s)')
@@ -433,14 +594,16 @@ def main(argv=None):
             name, sizes = fut.result()
             report[name] = sizes
 
-    # ---- voice (byte copies of what exists)
+    # ---- voice (the lines that exist)
+    voice_stats = {}
     if 'voice' in parts and voice_src:
         os.makedirs(os.path.join(OUT, 'voice'), exist_ok=True)
-        for f in voice_src:
-            src, dst = os.path.join(SRC, 'voice', f), os.path.join(OUT, 'voice', f)
-            if not os.path.exists(dst) or os.path.getsize(dst) != os.path.getsize(src) or open(src, 'rb').read() != open(dst, 'rb').read():
-                shutil.copyfile(src, dst + '.tmp')
-                os.replace(dst + '.tmp', dst)
+        if args.voice_kbps and not have_ffmpeg():
+            warn('ffmpeg not found: voice lines are copied without re-encoding')
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+            for res in pool.map(lambda f: ship_voice(os.path.join(SRC, 'voice', f), os.path.join(OUT, 'voice', f), args.voice_kbps,
+                                                 args.voice_lufs or None), voice_src):
+                voice_stats[res] = voice_stats.get(res, 0) + 1
 
     # ---- prune / stale report
     expected = {('splash', h) for h in hero_pngs} | {('card', h) for h in hero_pngs} | {('token', h) for h in hero_pngs}
@@ -463,7 +626,7 @@ def main(argv=None):
             warn(f'{rel(p)} has no source (kept; --prune deletes it)')
     for base, _, files in os.walk(OUT):
         for f in files:
-            if f.endswith('.tmp'):
+            if '.tmp' in f:
                 os.remove(os.path.join(base, f))
 
     # ---- manifest (from what is actually shipped)
@@ -495,7 +658,8 @@ def main(argv=None):
         print('  keyart    -        (no assets/rpg/keyart/valkyries-keyart.png)')
     print(f'  total          {fmt_kb(grand)}')
     voiced = [h for h in roster if any(f.startswith(h + '-') for f in shipped_voice)]
-    print(f'voice: {len(shipped_voice)} line(s) shipped for {len(voiced)} hero(es)')
+    stats = ', '.join(f'{v} {k}' for k, v in sorted(voice_stats.items()))
+    print(f'voice: {len(shipped_voice)} line(s) shipped for {len(voiced)} hero(es){" (" + stats + ")" if stats else ""}')
     print(f'manifest {rel(ASSETS_JS)}: {"updated" if changed else "unchanged"}')
 
     if args.sheet:

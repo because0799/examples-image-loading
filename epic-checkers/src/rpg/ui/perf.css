@@ -1,0 +1,86 @@
+/* ==========================================================================
+   «Валькирии доски» — performance tiers (loaded last). Classes on .rv-root (index.js):
+     rq-high | rq-medium | rq-low   effective quality (follows the app's q-* class / setEffectiveQuality)
+     rv-battery                      settings.battery
+   The battle screen is always lean: no loops, no filters, small shadows (hud.css).
+   ========================================================================== */
+
+/* medium / low / battery: no large blurred shadows */
+.rv-root.rq-medium .rv-btn__bg,
+.rv-root.rq-low .rv-btn__bg,
+.rv-root.rv-battery .rv-btn__bg,
+.rv-root.rq-medium .rv-tile,
+.rv-root.rq-low .rv-tile,
+.rv-root.rv-battery .rv-tile,
+.rv-root.rq-medium .rv-panel,
+.rv-root.rq-low .rv-panel,
+.rv-root.rv-battery .rv-panel,
+.rv-root.rq-medium .rv-card,
+.rv-root.rq-low .rv-card,
+.rv-root.rv-battery .rv-card,
+.rv-root.rq-low .rv-banner,
+.rv-root.rv-battery .rv-banner,
+.rv-root.rq-low .rv-camp__map,
+.rv-root.rv-battery .rv-camp__map {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.rv-root.rq-low .rv-ru.is-ready::before,
+.rv-root.rv-battery .rv-ru.is-ready::before,
+.rv-root.rq-low .rv-act--ult.is-ready:not(:disabled) .rv-act__bg,
+.rv-root.rv-battery .rv-act--ult.is-ready:not(:disabled) .rv-act__bg {
+  box-shadow: none;
+}
+
+/* loops off on medium (paint-heavy) and everything decorative off on low / battery */
+.rv-root.rq-medium .rv-btn--gold .rv-btn__bg::after,
+.rv-root.rq-low .rv-btn--gold .rv-btn__bg::after,
+.rv-root.rv-battery .rv-btn--gold .rv-btn__bg::after,
+.rv-root.rq-medium .rv-btn--crystal .rv-btn__bg::after,
+.rv-root.rq-low .rv-btn--crystal .rv-btn__bg::after,
+.rv-root.rv-battery .rv-btn--crystal .rv-btn__bg::after {
+  animation: none;
+  display: none;
+}
+.rv-root.rq-low .rv-card__iris,
+.rv-root.rv-battery .rv-card__iris,
+.rv-root.rq-low .rv-node.is-current .rv-node__tile::after,
+.rv-root.rv-battery .rv-node.is-current .rv-node__tile::after {
+  animation: none;
+}
+.rv-root.rq-low .rv-starfield i,
+.rv-root.rv-battery .rv-starfield i {
+  box-shadow: none;
+}
+
+/* text-glow filters (drop-shadow) are separate GPU passes: off below high */
+.rv-root.rq-medium .rv-hub__name,
+.rv-root.rq-low .rv-hub__name,
+.rv-root.rv-battery .rv-hub__name,
+.rv-root.rq-medium .rv-banner__title,
+.rv-root.rq-low .rv-banner__title,
+.rv-root.rv-battery .rv-banner__title,
+.rv-root.rq-medium .rv-res__kanji,
+.rv-root.rq-low .rv-res__kanji,
+.rv-root.rv-battery .rv-res__kanji,
+.rv-root.rq-low .rv-const__star.is-lit,
+.rv-root.rv-battery .rv-const__star.is-lit,
+.rv-root.rq-low .rv-camp__path line.is-lit,
+.rv-root.rv-battery .rv-camp__path line.is-lit,
+.rv-root.rq-low .rv-cur--crystals .rv-cur__ico,
+.rv-root.rv-battery .rv-cur--crystals .rv-cur__ico {
+  filter: none;
+}
+
+/* overlays opened over the running battle (pause, confirm, pass-the-phone): the shine runs twice */
+.rv-ov .rv-btn--gold .rv-btn__bg::after,
+.rv-ov .rv-btn--crystal .rv-btn__bg::after {
+  animation-iteration-count: 2;
+}
+
+/* the battle screen: the HUD sits over the live WebGL canvas — keep its layers tiny */
+.rv-screen--battle .rv-card__iris {
+  animation: none;
+}
+.rv-screen--battle * {
+  will-change: auto;
+}

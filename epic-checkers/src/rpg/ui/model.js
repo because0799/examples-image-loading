@@ -26,7 +26,7 @@ import {
 import { HEROES, HERO_BY_ID } from '../data/heroes.js';
 import { VOICE_LINES, VOICE_EVENTS } from '../data/voice-lines.js';
 
-export { ELEMENTS, ELEMENT_ORDER, ROLES, ROLE_ORDER, RARITIES, RARITY_ORDER, REACTIONS, STATUSES, HEROES, HERO_BY_ID };
+export { ELEMENTS, ELEMENT_ORDER, ROLES, ROLE_ORDER, RARITIES, RARITY_ORDER, REACTIONS, STATUSES, CAMPAIGN, HEROES, HERO_BY_ID };
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 const num = (v, def = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : def);
@@ -185,7 +185,15 @@ function patchNum(v, p) {
 // ------------------------------------------------------------------------------- progression
 
 /** Current level cap (10 / 20 / 30) from the campaign progress (rules.js PROGRESSION.levelCaps). */
-export function levelCap(profile) {
+export function levelCap(profile, meta = null) {
+  if (meta && typeof meta.levelCap === 'function') {
+    try {
+      const v = meta.levelCap(profile);
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+    } catch (e) {
+      /* local rule below */
+    }
+  }
   let cap = PROGRESSION.levelCaps[0].cap;
   for (const lc of PROGRESSION.levelCaps) {
     if (lc.unlock === 'start') cap = Math.max(cap, lc.cap);
@@ -250,6 +258,35 @@ export function xpGainPath(levelAfter, xpAfter, gained) {
   }
   const from = xpProgress(L, x);
   return { from, to, levelUps: Math.max(0, to.level - from.level) };
+}
+
+/** XP scrolls the profile owns. */
+export function scrollsOwned(profile) {
+  return Math.max(0, int(profile && (profile.xpScrolls ?? profile.scrolls), 0));
+}
+
+/**
+ * How many XP scrolls a hero can still absorb at the current level cap (meta.scrollsUseful when
+ * injected). 0 = full bar at the cap or not owned.
+ */
+export function scrollsUseful(profile, id, meta = null) {
+  if (!isOwned(profile, id)) return 0;
+  if (meta && typeof meta.scrollsUseful === 'function') {
+    try {
+      const v = meta.scrollsUseful(profile, id);
+      if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, Math.floor(v));
+    } catch (e) {
+      /* local rule below */
+    }
+  }
+  const e = heroEntry(profile, id);
+  const level = heroLevel(profile, id);
+  if (level >= PROGRESSION.maxLevel) return 0;
+  const cap = levelCap(profile, meta);
+  let need = 0;
+  for (let L = level; L <= Math.min(cap, PROGRESSION.maxLevel - 1); L++) need += xpToNext(L);
+  need -= Math.max(0, int(e && e.xp, 0));
+  return Math.max(0, Math.ceil(need / PROGRESSION.xpScroll));
 }
 
 // ------------------------------------------------------------------------------------ squads
@@ -482,7 +519,7 @@ export function canSummonCount(profile, count, meta = null) {
       /* local rule below */
     }
   }
-  if (count < GACHA.cost.multiCount && novicePullsLeft(profile) > 0 && GACHA.noviceBanner.onlyMulti) return false;
+  // ×1 is always allowed: during the novice banner it simply goes to the standard banner
   return crystalsOf(profile) >= summonCost(count, meta);
 }
 

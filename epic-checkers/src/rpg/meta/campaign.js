@@ -113,19 +113,16 @@ export function chapterOf(stageId) {
 
 // ----------------------------------------------------------------------------------- enemies
 
-// 1-3 «Прыжок за прыжком»: the reflections stand in a "ladder" so a Blade on b2 has an open
-// 3-hop chain b2 → d4 → f6 → h8 (over c3, e5, g7) — the chain tutorial. The fourth enemy guards b8.
-const LADDER = ['c3', 'e5', 'g7', 'b8'].map(squareIndex);
-
 function refl(heroId, level, extra) {
   return { heroId, level, constellation: 0, reflection: true, ...extra };
 }
 
 /**
- * Enemy Squad of a stage: [{ heroId, level, constellation: 0, reflection: true, sq?, elite?,
- * miniBoss?, boss?, hpMult?, bossRules? }]. `profile` is needed for the mirror stage (3-8, the
+ * Enemy Squad of a stage: [{ heroId, level, constellation: 0, reflection: true, elite?, miniBoss?,
+ * boss?, hpMult?, bossRules?, mirror? }]. `profile` is needed for the mirror stage (3-8, the
  * player's current squad with its constellations at the stage level); without it the starter squad
- * is mirrored. Always returns fresh objects.
+ * is mirrored. Positions are left to the battle engine (default AI deployment, or the stage rule
+ * `presetFormation` such as 1-3's ladder, which the engine owns). Always returns fresh objects.
  */
 export function enemySquad(stage, profile = null) {
   const st = typeof stage === 'string' ? stageById(stage) : stage;
@@ -158,11 +155,6 @@ export function enemySquad(stage, profile = null) {
     }
     return e;
   });
-  if (st.rule && st.rule.id === 'presetFormation' && st.rule.formation === 'ladder') {
-    out.forEach((e, i) => {
-      if (i < LADDER.length) e.sq = LADDER[i];
-    });
-  }
   return out;
 }
 
