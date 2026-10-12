@@ -38,8 +38,14 @@ function bruteMoves(s, depth) {
 // (≈ 0.2 / 0.4 / 0.8 s of search on a desktop core).
 const NODES = { 3: 120000, 4: 250000, 5: 500000 };
 
+// These tests check what the search CALCULATES. Levels 3 and 4 deliberately play a human-like
+// share of imperfect moves (glances, slips, noise — see levels.js and levels.test.js), so their
+// calculation is tested with the error model switched off; level 5 has none.
+const CALC = { random: 0, glance: 0, slip: 0, noise: 0 };
+
 function aiMove(s, level, extra = {}) {
-  const r = search(s, { level, timeMs: 30000, maxNodes: NODES[level], seed: 11, newGame: true, ...extra });
+  const params = level < 5 ? { ...CALC, ...(extra.params || {}) } : extra.params;
+  const r = search(s, { level, timeMs: 30000, maxNodes: NODES[level], seed: 11, newGame: true, ...extra, params });
   return { r, str: pathStr(s, r.path), move: E.findMove(E.legalMoves(s), r.path) };
 }
 
@@ -108,6 +114,24 @@ for (const [id, pos, shot] of SHOTS) {
     for (const level of STRONG) assert.equal(aiMove(s, level).str, shot, `level ${level}`);
   });
 }
+
+test('level 3 with its human errors still finds most of its own 2-for-1 shots', () => {
+  // A first impression (depth 1 + the capture sequence) already shows a simple shot of one's own;
+  // longer combinations (here Turkish e5-e6, International 44-40) need the full look that level 3
+  // skips on some moves.
+  let found = 0;
+  let total = 0;
+  for (const [id, pos, shot] of SHOTS) {
+    const s = E.stateFromString(id, pos);
+    for (let seed = 1; seed <= 10; seed++) {
+      const r = search(s, { level: 3, timeMs: 30000, seed, newGame: true });
+      total++;
+      if (pathStr(s, r.path) === shot) found++;
+    }
+  }
+  console.log(`  level 3 found its shot in ${found}/${total} searches`);
+  assert.ok(found >= total * 0.75 && found < total, `${found}/${total}`);
+});
 
 // ------------------------------------------------------------------ promotion
 const PROMOTE = [

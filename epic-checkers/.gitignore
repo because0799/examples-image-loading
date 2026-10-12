@@ -2,3 +2,9 @@ node_modules/
 dist/
 *.log
 !release/*.apk
+
+# RPG source art/audio (ElevenLabs originals; shipped WebP/MP3 copies live in web/static/rpg)
+assets/rpg/heroes/
+assets/rpg/bg/
+assets/rpg/keyart/
+assets/rpg/voice/

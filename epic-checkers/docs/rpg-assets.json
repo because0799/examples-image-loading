@@ -1,0 +1,346 @@
+[
+  {
+    "id": "liora",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/liora.png",
+    "size": "1280x720",
+    "rarity": "mythic",
+    "element": "radiance",
+    "focal": {
+      "x": 0.5,
+      "y": 0.27
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a divine queen-knight of light. Long flowing platinum-blonde hair with a single side braid, golden eyes, serene confident smile. A radiant halo of eight golden star points floats behind her head; a pair of large luminous white-gold feathered wings. Outfit: high-collared white and gold plate armour over a long flowing white skirt-cape, long sleeves, gauntlets, a black-and-gold checkered sash at the waist. Weapon: a huge greatsword of crystallised starlight held diagonally across her body. Palette: white, warm gold, pale sky blue. Background: a celestial throne hall floating in a sunrise sky, beams of light falling across a giant floating checkerboard floor. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Mythic-tier design: divine and epic, glowing halo, majestic wings, cosmic star effects, ultra detailed. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "nocturna",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/nocturna.png",
+    "size": "1280x720",
+    "rarity": "mythic",
+    "element": "umbra",
+    "focal": {
+      "x": 0.5,
+      "y": 0.26
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, an imperial sorceress of the eclipse. Long straight black hair with magenta inner highlights, pale skin, violet-magenta eyes, calm imperious expression. A black eclipse-sun halo with a magenta corona behind her head; translucent wings made of starry night sky. Outfit: high-necked black and deep-violet imperial gown with long sleeves, layered skirt embroidered with constellations, silver crescent jewellery. Weapon: a slender crescent-topped sceptre, with an orb of black flame floating above her raised palm. Palette: black, magenta-crimson, lavender. Background: a dark palace balcony under a total solar eclipse, ink-like shadow tendrils and drifting stars. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Mythic-tier design: divine and epic, glowing halo, majestic wings, cosmic star effects, ultra detailed. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "reika",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/reika.png",
+    "size": "1280x720",
+    "rarity": "legendary",
+    "element": "storm",
+    "focal": {
+      "x": 0.47,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a cool-headed thunder sniper. Short asymmetrical lavender bob with one longer side lock, sharp violet eyes, a small crystal targeting lens over one eye, focused expression. Outfit: long dark-navy military greatcoat with violet trim, high collar, long sleeves, fitted gloves and tall boots. Weapon: a large ornate crossbow-railgun crackling with violet lightning, aimed in a firing stance with one knee raised. Palette: violet, dark navy, white. Background: a storm-lashed watchtower rooftop at night, lightning across purple clouds. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Legendary-tier design: lavish ornate costume, golden rim light, sparkling particles. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "fuyuka",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/fuyuka.png",
+    "size": "1280x720",
+    "rarity": "legendary",
+    "element": "frost",
+    "focal": {
+      "x": 0.5,
+      "y": 0.27
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, an aristocratic ice-queen guardian. Long silver-white hair in an elegant updo with an ice-crystal tiara, pale blue eyes, poised proud expression. Outfit: high-collared pale-blue and white armoured gown with a structured breastplate, long sleeves, a short fur-trimmed cape. Weapon: a tall crystalline tower shield in one hand and a slender ice lance in the other. Palette: ice cyan, white, deep royal blue. Background: a frozen palace hall of glacier pillars and icicle chandeliers, snow drifting in blue light. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Legendary-tier design: lavish ornate costume, golden rim light, sparkling particles. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "vermilia",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/vermilia.png",
+    "size": "1280x720",
+    "rarity": "legendary",
+    "element": "flame",
+    "focal": {
+      "x": 0.5,
+      "y": 0.27
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a flamboyant phoenix sorceress. Long voluminous crimson hair turning into flame at the tips, amber eyes, playful confident smirk; flaming phoenix feathers fan out behind her like wings. Outfit: high-necked crimson and gold sorceress dress with long sleeves and a layered flame-pattern skirt, gold arm cuffs. Weapon: an ornate folding fan made of fire and a burning phoenix-feather staff. Palette: crimson-orange, gold, dark wine. Background: a volcanic twilight sky with a rising phoenix of fire and swirling embers. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Legendary-tier design: lavish ornate costume, golden rim light, sparkling particles. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "tsubame",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/tsubame.png",
+    "size": "1280x720",
+    "rarity": "legendary",
+    "element": "gale",
+    "focal": {
+      "x": 0.52,
+      "y": 0.26
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a tomboyish wind ninja. Short messy dark-teal hair with a long swallow-tail ponytail, bright green eyes, cocky grin, a small scar on one cheek. Outfit: fitted dark-navy ninja jacket with long sleeves and a high collar, a long jade-green scarf trailing in the wind, wrapped forearms, shorts over full-length leggings and tall boots. Weapon: two reverse-grip short blades; swirls of wind and swallow feathers around her as she leaps through the air. Palette: jade green, dark navy, white. Background: cliffs above a sea of clouds with strong wind streaks. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Legendary-tier design: lavish ornate costume, golden rim light, sparkling particles. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "mizuha",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/mizuha.png",
+    "size": "1280x720",
+    "rarity": "epic",
+    "element": "tide",
+    "focal": {
+      "x": 0.5,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a gentle tide priestess and lighthouse keeper. Long wavy sea-blue hair with white seashell hairpins, soft blue eyes, calm kind smile. Outfit: layered white and ocean-blue priestess robes with wide long sleeves and a long skirt, a rope belt with a small brass bell. Weapon: a tall staff topped with a large bronze bell and a hanging lantern filled with glowing water. Palette: ocean blue, aqua, warm white. Background: a lighthouse on a rocky shore at twilight with gently glowing waves. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Epic-tier design: refined costume with ornate details and a subtle magical glow. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "akane",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/akane.png",
+    "size": "1280x720",
+    "rarity": "epic",
+    "element": "flame",
+    "focal": {
+      "x": 0.5,
+      "y": 0.27
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a hot-blooded flame swordswoman. Long bright scarlet hair in a high ponytail tied with a black ribbon, fierce red-orange eyes, determined grin. Outfit: a crimson and black battle jacket in a kimono style with long sleeves over a fitted black high-necked bodysuit, an armoured shoulder guard, wide trousers and boots. Weapon: a katana wreathed in fire, swung forward in a charging stance. Palette: scarlet, orange, black. Background: a sunrise battlefield with burning embers under a red sky. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Epic-tier design: refined costume with ornate details and a subtle magical glow. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "volta",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/volta.png",
+    "size": "1280x720",
+    "rarity": "epic",
+    "element": "storm",
+    "focal": {
+      "x": 0.5,
+      "y": 0.29
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a mischievous storm witch. Fluffy medium-length violet hair with yellow lightning-shaped streaks, a tall crooked witch hat with a copper lightning rod on top, bright yellow eyes, teasing wink; a small grumpy storm-cloud pet floats beside her. Outfit: high-collared purple witch coat with long sleeves and yellow trim, a long skirt, striped stockings and boots. Weapon: a staff shaped like a lightning rod crackling with sparks, which she sits on sideways. Palette: violet, electric yellow, dark plum. Background: a crooked wizard tower in a thunderstorm. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Epic-tier design: refined costume with ornate details and a subtle magical glow. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "koyuki",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/koyuki.png",
+    "size": "1280x720",
+    "rarity": "epic",
+    "element": "frost",
+    "focal": {
+      "x": 0.48,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a quiet petite snow archer. Straight shoulder-length white hair with pale-blue tips and a snowflake hair clip, calm light-blue eyes, focused gentle expression. Outfit: a white fur-lined hooded winter coat with long sleeves, a pale-blue scarf, fingerless mittens, a long skirt over leggings, boots. Weapon: a crystal ice bow drawn with an arrow of frost. Palette: white, ice blue, slate blue. Background: a silent snowy pine forest at dusk with falling snow. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Epic-tier design: refined costume with ornate details and a subtle magical glow. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "lucille",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/lucille.png",
+    "size": "1280x720",
+    "rarity": "epic",
+    "element": "radiance",
+    "focal": {
+      "x": 0.5,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a gentle candle cleric. Soft wavy honey-blonde hair in a low side braid, warm amber eyes, shy kind smile. Outfit: a cream-white and gold cleric habit with long sleeves and a high collar, a short cape embroidered with a sun. Weapon: a tall staff topped with a glowing lantern-candle; warm motes of light float around her. Palette: warm white, honey gold, soft peach. Background: a cathedral interior at dawn with stained-glass light beams and floating candles. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Epic-tier design: refined costume with ornate details and a subtle magical glow. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "karasu",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/karasu.png",
+    "size": "1280x720",
+    "rarity": "epic",
+    "element": "umbra",
+    "focal": {
+      "x": 0.5,
+      "y": 0.27
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a silent crow assassin. Straight black hair in a blunt princess cut with a few crimson-magenta streaks, half-lidded grey eyes, calm expressionless face, a black feather earring. Outfit: a long black feathered cloak with a high collar over a fitted dark-grey long-sleeved bodysuit, a crimson sash, gloves and boots. Weapon: two black kunai-like blades; crow feathers swirl around her. Palette: black, crimson-magenta, cool grey. Background: moonlit rooftops of a fantasy city at midnight with a flock of crows. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Epic-tier design: refined costume with ornate details and a subtle magical glow. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "zlata",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/zlata.png",
+    "size": "1280x720",
+    "rarity": "epic",
+    "element": "terra",
+    "focal": {
+      "x": 0.5,
+      "y": 0.27
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a cheerful sturdy amber guardian. Long honey-brown hair in two thick braids, warm amber eyes, big confident smile, athletic build. Outfit: bronze and amber plate armour over a long-sleeved brown tunic, a layered armoured skirt, an embroidered folk-pattern sash, heavy boots. Weapon: a huge round shield studded with glowing amber crystals and a stone war hammer resting on her shoulder. Palette: amber, bronze-brown, cream. Background: a canyon of amber-crystal rock formations in golden afternoon light. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Epic-tier design: refined costume with ornate details and a subtle magical glow. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "kaede",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/kaede.png",
+    "size": "1280x720",
+    "rarity": "epic",
+    "element": "gale",
+    "focal": {
+      "x": 0.51,
+      "y": 0.27
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a graceful maple wind dancer. Long auburn-red hair with green inner highlights flowing in the wind, a maple-leaf hair ornament, bright green eyes, joyful smile. Outfit: an autumn-coloured dancer’s outfit with long flowing sleeves, a high collar, a layered skirt over leggings, a jade sash. Weapon: two folding war fans with bladed edges; red maple leaves whirl around her as she spins. Palette: maple red-orange, jade green, warm gold. Background: an autumn mountain shrine path with whirling red maple leaves. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Epic-tier design: refined costume with ornate details and a subtle magical glow. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "torvald",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/torvald.png",
+    "size": "1280x720",
+    "rarity": "rare",
+    "element": "flame",
+    "focal": {
+      "x": 0.5,
+      "y": 0.27
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with his face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching his element, no text, no logo, no watermark. Subject: an adult man, a burly blacksmith knight. Short dark-brown hair and a neat short beard, a smudge of soot on his cheek, warm brown eyes, gruff but kind expression. Outfit: a heavy leather blacksmith apron over dark plate armour with glowing red-hot seams, long sleeves, thick gloves, boots. Weapon: a massive forge hammer and a riveted iron shield glowing orange at the rim. Palette: fire orange, iron grey, brass. Background: a forge workshop full of sparks and molten metal. Modest practical fantasy battle attire, no fanservice. Rare-tier design: simple, clean costume with few accessories. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "shio",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/shio.png",
+    "size": "1280x720",
+    "rarity": "rare",
+    "element": "tide",
+    "focal": {
+      "x": 0.5,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a cheerful sea corsair swordswoman. Wavy sea-blue hair in a short ponytail under a tricorn hat, tanned skin, bright blue eyes, confident grin. Outfit: a white long-sleeved shirt with a buttoned navy waistcoat, a red sash, a long navy coat, trousers and boots. Weapon: a curved cutlass dripping with seawater. Palette: navy blue, sand beige, red. Background: the deck of a ship on sunny waves with sea spray. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Rare-tier design: simple, clean costume with few accessories. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "maren",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/maren.png",
+    "size": "1280x720",
+    "rarity": "rare",
+    "element": "tide",
+    "focal": {
+      "x": 0.5,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a stern northern harpoon hunter. Long dark-blue hair in a single thick braid, grey-blue eyes, serious calm expression. Outfit: a hooded oilskin coat over a thick knitted sweater, a fur collar, leather bracers, long trousers and boots. Weapon: a long harpoon with a coiled rope. Palette: deep blue, steel grey, leather brown. Background: an icy northern harbour with grey waves. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Rare-tier design: simple, clean costume with few accessories. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "mashiro",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/mashiro.png",
+    "size": "1280x720",
+    "rarity": "rare",
+    "element": "frost",
+    "focal": {
+      "x": 0.5,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a gentle snow healer. Fluffy white hair in a low bun with a snowflake brooch, sleepy pale-blue eyes, soft smile. Outfit: a long white and pale-blue winter healer’s dress with long sleeves, an apron with pockets, a knitted shawl. Weapon: a small staff topped with an ice crystal and a roll of glowing frost bandages. Palette: white, pale cyan, soft pink. Background: a cosy snowy village courtyard at dusk with warm windows. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Rare-tier design: simple, clean costume with few accessories. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "iskra",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/iskra.png",
+    "size": "1280x720",
+    "rarity": "rare",
+    "element": "storm",
+    "focal": {
+      "x": 0.52,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, an energetic lightning courier. Short spiky violet hair with yellow goggles pushed up on her forehead, bright yellow eyes, cheeky grin. Outfit: a fitted purple messenger jacket with long sleeves, a satchel stuffed with letters, fingerless gloves, shorts over full-length leggings, running boots trailing sparks. Weapon: a short lightning dagger; she is mid-sprint with electric trails behind her. Palette: violet, electric yellow, black. Background: city rooftops under a thundery evening sky. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Rare-tier design: simple, clean costume with few accessories. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "sirin",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/sirin.png",
+    "size": "1280x720",
+    "rarity": "rare",
+    "element": "gale",
+    "focal": {
+      "x": 0.5,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a dreamy wind bard. Long light-green hair with feather ornaments, sky-blue eyes, gentle singing expression. Outfit: a cream and green travelling bard’s tunic dress with long sleeves, a short feathered cape, boots. Weapon: a lyre-like harp shaped like a pair of bird wings; ribbons of wind and music swirl around her. Palette: mint green, cream, sky blue. Background: a grassy hilltop with windmills and birds in a bright sky. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Rare-tier design: simple, clean costume with few accessories. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "falk",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/falk.png",
+    "size": "1280x720",
+    "rarity": "rare",
+    "element": "terra",
+    "focal": {
+      "x": 0.48,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with his face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching his element, no text, no logo, no watermark. Subject: an adult man, a stoic stone crossbowman. Short ash-blond hair, light stubble, narrow green eyes, serious expression. Outfit: a hooded olive cloak over brown leather armour with stone-plate pauldrons, long sleeves, gloves and boots. Weapon: a heavy siege crossbow loaded with a stone-tipped bolt, aimed forward. Palette: amber, stone grey, forest green. Background: a rocky canyon with crumbling stone ruins. Modest practical fantasy battle attire, no fanservice. Rare-tier design: simple, clean costume with few accessories. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "runa",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/runa.png",
+    "size": "1280x720",
+    "rarity": "rare",
+    "element": "terra",
+    "focal": {
+      "x": 0.5,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a studious sand-rune architect. Neat shoulder-length teal-black hair, round glasses, amber eyes, thoughtful expression. Outfit: a long sand-coloured architect’s robe with long sleeves, rolled blueprints in a satchel, a belt of measuring tools. Weapon: a stylus drawing glowing amber runes in the air while floating stone blocks orbit her. Palette: sand gold, cream, teal. Background: desert ruins with geometric stone pillars at golden hour. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Rare-tier design: simple, clean costume with few accessories. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "vera",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/vera.png",
+    "size": "1280x720",
+    "rarity": "rare",
+    "element": "radiance",
+    "focal": {
+      "x": 0.5,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, an earnest young paladin. Short golden-blonde hair with a straight fringe, bright blue eyes, determined honest expression. Outfit: polished silver plate armour with a long blue tabard bearing a sun emblem, chainmail sleeves, gauntlets and boots. Weapon: a large kite shield glowing with radiant light, raised high, and a short sword. Palette: pale gold, silver, royal blue. Background: a castle courtyard at sunrise with fluttering banners. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Rare-tier design: simple, clean costume with few accessories. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "mara",
+    "kind": "hero",
+    "file": "assets/rpg/heroes/mara.png",
+    "size": "1280x720",
+    "rarity": "rare",
+    "element": "umbra",
+    "focal": {
+      "x": 0.5,
+      "y": 0.28
+    },
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, the character centered with her face in the upper-middle of the frame, upper body to knees visible, dynamic heroic pose, detailed fantasy background matching her element, no text, no logo, no watermark. Subject: an adult woman, a sly charming night thief. Long dark-purple hair in a loose low ponytail, magenta eyes, playful smirk, a beauty mark under one eye. Outfit: a dark hooded cloak with gold clasps, a fitted long-sleeved black and plum jacket, trousers with many pouches, gloves and boots. Weapon: a dagger twirled in one hand and a stolen golden coin in the other; shadows curl around her feet. Palette: plum-magenta, black, gold. Background: a moonlit night-market alley with paper lanterns. Modest outfit, no cleavage, no fanservice, fully covered practical fantasy battle attire. Rare-tier design: simple, clean costume with few accessories. Original character design, not based on any existing franchise."
+  },
+  {
+    "id": "bg-dawn",
+    "kind": "bg",
+    "file": "assets/rpg/bg/bg-dawn.png",
+    "size": "1280x720",
+    "note": "chapter 1 «Рассветная Марка»",
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape. Environment background only: an empty circular arena platform of pale weathered stone, seen from a high three-quarter top-down angle, in a dewy meadow at sunrise. The center of the platform is a large flat, calm, evenly and softly lit stone floor with very little detail (a game board will be placed over it). Around the edges: low ruined pillars wrapped in ivy, wildflowers, glittering dew, morning mist and golden god-rays. Palette: fresh green, warm gold, pale sky blue. Gentle, inviting mood. Keep the central 60% of the frame low-contrast and uncluttered. no characters, no people, no creatures, no text, no logo, no watermark, no game pieces, no UI."
+  },
+  {
+    "id": "bg-ash",
+    "kind": "bg",
+    "file": "assets/rpg/bg/bg-ash.png",
+    "size": "1280x720",
+    "note": "chapter 2 «Пепельный Предел»",
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape. Environment background only: an empty circular arena platform of dark obsidian, seen from a high three-quarter top-down angle, on a volcanic plateau. The center of the platform is a large flat, calm, evenly lit dark floor with very little detail (a game board will be placed over it). Around the edges: glowing orange lava cracks, drifting ash and embers, jagged basalt columns and a distant erupting volcano under a smoky crimson sky. Palette: charcoal, crimson, molten orange. Tense, heroic mood. Keep the central 60% of the frame low-contrast and uncluttered. no characters, no people, no creatures, no text, no logo, no watermark, no game pieces, no UI."
+  },
+  {
+    "id": "bg-sky",
+    "kind": "bg",
+    "file": "assets/rpg/bg/bg-sky.png",
+    "size": "1280x720",
+    "note": "chapter 3 «Небесный Эндшпиль»",
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape. Environment background only: an empty circular arena platform of white marble inlaid with star-glass, floating among clouds at the edge of space, seen from a high three-quarter top-down angle. The center of the platform is a large flat, calm, evenly lit floor with very little detail (a game board will be placed over it). Around the edges: floating fragments of giant checkerboard tiles, glowing constellation lines, auroras, a distant ringed crescent planet and a half-eclipsed sun. Palette: deep indigo, violet, gold accents. Majestic, final-battle mood. Keep the central 60% of the frame low-contrast and uncluttered. no characters, no people, no creatures, no text, no logo, no watermark, no game pieces, no UI."
+  },
+  {
+    "id": "keyart",
+    "kind": "keyart",
+    "file": "assets/rpg/keyart/valkyries-keyart.png",
+    "size": "1280x720",
+    "note": "title screen of the mode, hub background, summon banner, main-menu tile (cropped)",
+    "prompt": "high-quality anime gacha RPG key art, cel-shaded with painterly lighting, clean lineart, vibrant element-coloured lighting, 16:9 landscape, ensemble key art of six adult women heroines on a giant floating checkerboard under a sky split between golden dawn and a black eclipse, all faces clearly visible in the upper half of the frame, dynamic heroic poses, detailed fantasy background. Center front: a divine queen-knight with long platinum-blonde hair, a golden star halo and large white-gold feathered wings, in white and gold plate armour, raising a greatsword of crystallised starlight. Behind her on the right: an imperial sorceress with long black hair and magenta highlights, a black eclipse halo, in a high-necked black and violet gown, holding a crescent sceptre. Left: a scarlet-haired swordswoman with a high ponytail swinging a flaming katana, in a crimson and black battle jacket. Far left: a silver-haired ice queen with an ice tiara holding a crystal tower shield, in a pale-blue armoured gown. Right: a crimson-haired phoenix sorceress with flaming feathers fanning behind her and a fire fan. Top right, mid-leap: a teal-haired wind ninja with two reverse-grip blades and a long green scarf. All wear modest, fully covered fantasy battle attire, no cleavage, no fanservice. Gold, magenta and cyan light streaks, sparkles, epic title-screen composition with clear empty sky space at the top center for a logo. Original character designs, not based on any existing franchise. No text, no logo, no watermark."
+  }
+]

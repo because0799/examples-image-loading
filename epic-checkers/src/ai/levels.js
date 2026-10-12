@@ -9,8 +9,8 @@ export const AI_LEVELS = Object.freeze([
     kanji: '弟子',
     power: 530,
     desc: {
-      ru: 'Видит на ход вперёд и часто зевает. Для первых партий и детей.',
-      en: 'Looks one move ahead and blunders a lot. For first games and kids.',
+      ru: 'Видит только взятия, часто ходит наугад и не замечает угроз. Для детей и первых партий.',
+      en: 'Sees only captures, often moves at random and misses threats. For kids and first games.',
     },
   }),
   Object.freeze({
@@ -20,8 +20,8 @@ export const AI_LEVELS = Object.freeze([
     kanji: '戦士',
     power: 1800,
     desc: {
-      ru: 'Знает простые удары, но иногда ошибается. Хорош для разминки.',
-      en: 'Knows simple shots but still slips up now and then. A good warm-up.',
+      ru: 'Смотрит на ход вперёд, порой зевает шашку и не видит ваших ударов. Хорош для разминки.',
+      en: 'Looks a move ahead, drops a piece now and then, never sees your shots coming. A warm-up.',
     },
   }),
   Object.freeze({
@@ -31,8 +31,8 @@ export const AI_LEVELS = Object.freeze([
     kanji: '侍',
     power: 4200,
     desc: {
-      ru: 'Крепкий соперник: считает комбинации и не отдаёт шашки даром.',
-      en: 'A solid opponent: calculates combinations and never gives pieces away.',
+      ru: 'Игрок клубного уровня: считает на пару ходов, но порой играет «на глаз». Ловите момент!',
+      en: 'Club player: calculates a few moves ahead but sometimes trusts a first impression.',
     },
   }),
   Object.freeze({
@@ -42,8 +42,8 @@ export const AI_LEVELS = Object.freeze([
     kanji: '将軍',
     power: 9001,
     desc: {
-      ru: 'Глубокий расчёт и позиционное чутьё. Ошибок не прощает.',
-      en: 'Deep calculation and positional sense. Punishes every mistake.',
+      ru: 'Сильный игрок: глубокий расчёт, ошибается редко и почти любую ошибку накажет.',
+      en: 'Strong player: deep calculation, rare slips, punishes almost every mistake.',
     },
   }),
   Object.freeze({
@@ -60,25 +60,85 @@ export const AI_LEVELS = Object.freeze([
 ]);
 
 /**
- * Search parameters per level.
- *  timeMs     default thinking time
- *  maxDepth   iterative-deepening cap (plies, before extensions)
- *  multiPV    score every root move exactly (needed for noisy move choice)
- *  noise      std-dev of the gaussian noise added to root scores (multiPV levels; 100 = a man)
- *  blunder    probability of playing a random legal move instead
- *  jitter     ± deterministic per-position evaluation noise (variety without blunders)
- *  threatExt  horizon threat extensions allowed per line (quiet leaf where the opponent threatens a capture)
- *  lmr        late-move reductions
- *  contempt   how much worse than 0 the AI scores a draw for itself while ≥ 1/3 of the starting
- *             material is on the board (100 = a man): avoids early repetition draws (search.js)
+ * Search parameters per level. The ladder is meant to feel human: levels 1–3 are depth-capped
+ * searches that score every root move exactly (multiPV) and then choose with a human-error
+ * model — a beginner who sometimes just moves something, a casual player who does not see the
+ * opponent's shots coming, a club player who now and then trusts a first impression instead of
+ * calculating. Levels 4 and 5 are full time-limited searches (0.8 s and 2.5 s) whose only
+ * imprecision is a tiny evaluation jitter.
+ *
+ *  timeMs        default thinking time (for the depth-capped levels only a safety cap)
+ *  maxDepth      iterative-deepening cap (plies, before extensions)
+ *  multiPV       score every root move exactly at every depth (needed by the error model)
+ *  qMax          capture plies followed beyond the horizon (Infinity = every forced capture; a
+ *                small value means the level does not "see" the end of a capture sequence, e.g.
+ *                the opponent's sacrifice followed by a multi-capture — the 2-for-1 shot)
+ *  noise         std-dev of the gaussian noise added to the root scores (100 = a man)
+ *  jitter        ± deterministic per-position evaluation noise (noisy judgement at the leaves)
+ *  random        probability of a random move among the "safe" ones — after the move the piece
+ *                that moved cannot be captured at once (in giveaway: the move does not look worse
+ *                than the best by more than `suicide` at depth 1)
+ *  glance        probability of trusting a first impression: the best move at `glanceDepth` (a
+ *                shallower look) instead of the full depth — deeper tactics are missed — unless
+ *                the full depth refutes it by more than `glanceMaxLoss`
+ *  slip          probability of choosing one of the `slipTopN` next-best moves that are
+ *                `slipMinLoss`..`slipMaxLoss` worse by the level's own scores
+ *  threatExt     horizon threat extensions allowed per line (quiet leaf where the opponent threatens a capture)
+ *  lmr           late-move reductions
+ *  contempt      how much worse than 0 the AI scores a draw for itself while ≥ 1/3 of the starting
+ *                material is on the board (100 = a man): avoids early repetition draws (search.js)
+ *  giveaway      overrides for giveaway (поддавки) games
  */
+const NO_ERRORS = { random: 0, suicide: 0, glance: 0, glanceDepth: 0, glanceMaxLoss: 0, slip: 0, slipTopN: 0, slipMinLoss: 0, slipMaxLoss: 0 };
+
 export const LEVEL_PARAMS = Object.freeze({
-  1: Object.freeze({ timeMs: 120, maxDepth: 2, multiPV: true, noise: 140, blunder: 0.2, jitter: 0, threatExt: 0, lmr: false, contempt: 20 }),
-  2: Object.freeze({ timeMs: 220, maxDepth: 4, multiPV: true, noise: 45, blunder: 0.05, jitter: 0, threatExt: 1, lmr: false, contempt: 20 }),
-  3: Object.freeze({ timeMs: 400, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 8, threatExt: 1, lmr: true, contempt: 20 }),
-  4: Object.freeze({ timeMs: 1200, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 3, threatExt: 1, lmr: true, contempt: 20 }),
-  5: Object.freeze({ timeMs: 2500, maxDepth: 60, multiPV: false, noise: 0, blunder: 0, jitter: 2, threatExt: 1, lmr: true, contempt: 20 }),
+  1: Object.freeze({
+    ...NO_ERRORS,
+    timeMs: 300, maxDepth: 1, multiPV: true, qMax: 2, noise: 25, jitter: 12,
+    random: 0.35, suicide: 90,
+    threatExt: 0, lmr: false, contempt: 20,
+    giveaway: Object.freeze({}),
+  }),
+  2: Object.freeze({
+    ...NO_ERRORS,
+    timeMs: 500, maxDepth: 2, multiPV: true, qMax: 1, noise: 15, jitter: 12,
+    slip: 0.15, slipTopN: 3, slipMinLoss: 10, slipMaxLoss: 60,
+    threatExt: 1, lmr: false, contempt: 20,
+    // giveaway is decided by forcing sequences, where two plies of sight already dominate one:
+    // the casual player is sloppier there, or level 1 would hardly ever win a game
+    giveaway: Object.freeze({ noise: 35, jitter: 20, slip: 0.2, slipMaxLoss: 150 }),
+  }),
+  3: Object.freeze({
+    ...NO_ERRORS,
+    timeMs: 1000, maxDepth: 4, multiPV: true, qMax: Infinity, noise: 10, jitter: 8,
+    glance: 0.4, glanceDepth: 1, glanceMaxLoss: 300,
+    threatExt: 1, lmr: false, contempt: 20,
+    giveaway: Object.freeze({}),
+  }),
+  4: Object.freeze({
+    ...NO_ERRORS,
+    timeMs: 800, maxDepth: 60, multiPV: false, qMax: Infinity, noise: 0, jitter: 4,
+    threatExt: 1, lmr: true, contempt: 20,
+    giveaway: Object.freeze({}),
+  }),
+  5: Object.freeze({
+    ...NO_ERRORS,
+    timeMs: 2500, maxDepth: 60, multiPV: false, qMax: Infinity, noise: 0, jitter: 2,
+    threatExt: 1, lmr: true, contempt: 20,
+    giveaway: Object.freeze({}),
+  }),
 });
+
+/**
+ * Effective parameters of a level for a game type: the level's values, its giveaway overrides
+ * (in giveaway) and explicit `overrides` (testing / tuning).
+ */
+export function levelParams(level, giveaway = false, overrides = null) {
+  const base = LEVEL_PARAMS[clampLevel(level)];
+  const P = { ...base, ...(giveaway && base.giveaway ? base.giveaway : null), ...(overrides && typeof overrides === 'object' ? overrides : null) };
+  delete P.giveaway;
+  return P;
+}
 
 export function clampLevel(level) {
   const l = Math.round(Number(level));

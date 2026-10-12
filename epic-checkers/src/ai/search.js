@@ -1,9 +1,12 @@
 // AI search (pure; runs in Node, a Web Worker or the main thread).
 //
-//   search(state, { level = 3, timeMs, maxDepth, maxNodes, historyHashes = [], seed, newGame, allScores })
-//     -> { path, score, depth, selDepth, nodes, timeMs, nps, level, mate, pv, forced, scores? }
-//   score: side to move's view, 100 = one man; ±(1000000 - plies) = forced win/loss (mate = plies).
+//   search(state, { level = 3, timeMs, maxDepth, maxNodes, historyHashes = [], seed, newGame, allScores, params })
+//     -> { path, score, bestScore, choice, depth, selDepth, nodes, timeMs, nps, level, mate, pv, forced, scores? }
+//   score: side to move's view of the returned move, 100 = one man; ±(1000000 - plies) = forced
+//   win/loss (mate = plies). bestScore: the level's score of its best move (> score when the
+//   level chose a worse move). choice: how the move was picked (see chooseHumanMove).
 //   allScores: score every root move exactly (slower) → scores: [{ path, score }] best first.
+//   params: overrides of individual LEVEL_PARAMS values (testing / tuning).
 //   searchAsync(state, opts, { sliceMs, signal }) → Promise: the same search in time slices
 //   that yield to the event loop (main-thread fallback when no Web Worker is available).
 //
@@ -28,13 +31,25 @@
 //  - material tie-break: a draw (repetition or by rule) scores 2 × (own pieces − opponent's
 //    pieces), so among draws the AI keeps its material instead of hanging a king (RTR-03).
 //
+// Human-like levels (LEVEL_PARAMS in levels.js). Levels 1–3 score every root move exactly at
+// every depth of the iterative deepening (multiPV) and then choose like a player of that
+// strength (chooseHumanMove): a beginner sometimes just moves a piece that is not immediately
+// en prise ("random"), players trust a first impression — the best move at a shallower depth —
+// and miss what lies deeper ("glance"), pick a slightly worse one of the top moves ("slip") or
+// misjudge close moves (gaussian "noise" on the root scores, "jitter" on the evaluation). The weak
+// levels also stop following capture sequences after `qMax` plies beyond the horizon, so they do
+// not see an opponent's sacrifice + multi-capture (the 2-for-1 shot) coming; their
+// transposition-table entries are salted apart so that a full-strength search (the player's
+// hint, the other side of a demo game) never reuses those deliberately blind scores. Mandatory
+// capture is never at stake: every candidate is one of the engine's legal moves.
+//
 // The root always works on the engine's legalMoves(state), so the returned path is legal by
 // construction; the internal generator (board.js) is only used below the root.
 
-import { legalMoves, getVariant, squareName } from '../engine/index.js';
+import { legalMoves, applyMove, getVariant, squareName } from '../engine/index.js';
 import { SearchBoard, MAX_PLY } from './board.js';
 import { evaluate, getEvalTables } from './evaluate.js';
-import { LEVEL_PARAMS, clampLevel } from './levels.js';
+import { levelParams, clampLevel } from './levels.js';
 
 export const MATE = 1000000;
 export const MATE_BOUND = MATE - 10000;
@@ -136,6 +151,7 @@ const S = {
   jitter: 0,
   seed: 0,
   threatExt: 1,
+  qMax: 1000,
   lmr: true,
   count: 64,
   rootTurn: 1,
@@ -147,7 +163,24 @@ const S = {
 // Transposition-table salts per contempt mode: [no contempt, white root, black root].
 const SALT_LO = [0, 0x5bd1e995 | 0, 0x1b873593 | 0];
 const SALT_HI = [0, 0x27d4eb2f | 0, 0x165667b1 | 0];
+const UNLIMITED_Q = 1000;
+
+/**
+ * Extra salt for searches that cut capture sequences short (qMax, the weak levels): their scores
+ * are deliberately wrong and must never be reused by a full search sharing the table (a hint for
+ * the player, the other side of a demo game).
+ */
+function qSalt(qMax) {
+  if (qMax >= UNLIMITED_Q) return [0, 0];
+  let h = Math.imul((qMax + 1) | 0, 0x9e3779b1);
+  h ^= h >>> 15;
+  const lo = Math.imul(h, 0x85ebca6b) | 1;
+  const hi = Math.imul(h ^ 0x2545f491, 0xc2b2ae35) | 1;
+  return [lo, hi];
+}
 const DRAW_TIEBREAK = 2;
+// a promotion is preferred to a move that scores at most this much better (100 = a man)
+const PROMOTE_MARGIN = 12;
 
 /**
  * Score of a drawn position (repetition / draw by rule) for the side to move: the root side's
@@ -276,7 +309,11 @@ function scoreMoves(start, end, ttIndex, ply, isCap) {
   }
 }
 
-function negamax(depth, alpha, beta, ply, ext) {
+/**
+ * Negamax alpha-beta. `ext`: threat extensions left on this line; `q`: capture plies already
+ * searched beyond the horizon (weak levels stop following a capture sequence at S.qMax).
+ */
+function negamax(depth, alpha, beta, ply, ext, q) {
   const b = S.b;
   S.nodes++;
   if ((S.nodes & 1023) === 0) checkLimits();
@@ -315,11 +352,16 @@ function negamax(depth, alpha, beta, ply, ext) {
   }
 
   let capHint = 0;
+  let qNext = q;
   if (depth <= 0 || ply >= MAX_PLY - 4) {
     // horizon: captures are forced and searched (no stand-pat while one is available); in a quiet
     // position stand pat, unless the opponent threatens a capture (then look one ply further)
-    if (b.hasCapture(b.turn)) capHint = 1;
-    else {
+    if (b.hasCapture(b.turn)) {
+      // a weak level does not follow the capture sequence to its end
+      if (q >= S.qMax) return staticEval();
+      capHint = 1;
+      qNext = q + 1;
+    } else {
       if (!b.hasQuietMove()) return lossScore(ply);
       if (ext > 0 && ply < MAX_PLY - 4 && b.hasCapture(-b.turn)) {
         depth = 1;
@@ -366,13 +408,13 @@ function negamax(depth, alpha, beta, ply, ext) {
     b.make(mi);
     let score;
     if (moveNo === 0) {
-      score = -negamax(newDepth, -beta, -alpha, ply + 1, ext);
+      score = -negamax(newDepth, -beta, -alpha, ply + 1, ext, qNext);
     } else {
       let r = 0;
       if (S.lmr && quietMove && depth >= 3 && moveNo >= 3 && bs < ORD_KILLER2) r = moveNo >= 8 && depth >= 5 ? 2 : 1;
-      score = -negamax(newDepth - r, -alpha - 1, -alpha, ply + 1, ext);
-      if (r > 0 && score > alpha && !S.stop) score = -negamax(newDepth, -alpha - 1, -alpha, ply + 1, ext);
-      if (score > alpha && score < beta && !S.stop) score = -negamax(newDepth, -beta, -alpha, ply + 1, ext);
+      score = -negamax(newDepth - r, -alpha - 1, -alpha, ply + 1, ext, qNext);
+      if (r > 0 && score > alpha && !S.stop) score = -negamax(newDepth, -alpha - 1, -alpha, ply + 1, ext, qNext);
+      if (score > alpha && score < beta && !S.stop) score = -negamax(newDepth, -beta, -alpha, ply + 1, ext, qNext);
     }
     b.unmake(mi);
     if (S.stop) {
@@ -478,13 +520,13 @@ function rootIteration(list, depth, ext) {
     const r = list[k];
     b.make(r.i);
     let score;
-    if (k === 0) score = -negamax(depth - 1, -beta, -alpha, 1, ext);
+    if (k === 0) score = -negamax(depth - 1, -beta, -alpha, 1, ext, 0);
     else {
-      score = -negamax(depth - 1, -alpha - 1, -alpha, 1, ext);
+      score = -negamax(depth - 1, -alpha - 1, -alpha, 1, ext, 0);
       if (!S.stop && score > alpha) {
         // fail high: this move is better than the current best; re-search for the exact score
         const failHigh = score;
-        score = -negamax(depth - 1, -beta, -alpha, 1, ext);
+        score = -negamax(depth - 1, -beta, -alpha, 1, ext, 0);
         if (S.stop) {
           b.unmake(r.i);
           return { completed: false, best: r, score: failHigh };
@@ -510,7 +552,7 @@ function rootMultiPV(list, depth, ext) {
   for (let k = 0; k < list.length; k++) {
     const r = list[k];
     b.make(r.i);
-    const score = -negamax(depth - 1, -INF, INF, 1, ext);
+    const score = -negamax(depth - 1, -INF, INF, 1, ext, 0);
     b.unmake(r.i);
     if (S.stop) return null;
     scores[k] = score;
@@ -534,6 +576,95 @@ function gaussian(rng) {
   while (u === 0) u = rng();
   const v = rng();
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Human-like move choice (levels with multiPV): exact root scores at every depth go in, a move
+// a player of that strength could plausibly make comes out.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Root moves a beginner considers "safe" (indices into `list`). Normal games: after the move the
+ * piece that moved cannot be captured at once — the beginner's attention ends there, so a piece
+ * left hanging elsewhere (an ignored threat) or a shot set up by the opponent goes unnoticed.
+ * Giveaway (where losing pieces is the goal): the move must not look clearly worse at a glance
+ * (`glance` scores within `margin` of the best). Never empty.
+ */
+function safeMoves(state, list, giveaway, glance, margin) {
+  const out = [];
+  if (giveaway) {
+    let best = -INF;
+    for (const v of glance) if (v > best) best = v;
+    for (let k = 0; k < list.length; k++) if (glance[k] >= best - margin) out.push(k);
+  } else {
+    for (let k = 0; k < list.length; k++) {
+      const m = list[k].em;
+      const replies = legalMoves(applyMove(state, m));
+      if (!replies.some((x) => x.captures.includes(m.to))) out.push(k);
+    }
+  }
+  return out.length ? out : list.map((r, k) => k);
+}
+
+/**
+ * Pick a root move like a human of the level would (see LEVEL_PARAMS):
+ *  - `random`: a random move among the safe ones (the beginner's "let's see what happens");
+ *  - `glance`: the player trusts a first impression instead of calculating: the best move by
+ *    the scores of the shallower depth `glanceDepth` (plus noise). Whatever lies deeper — a
+ *    shot two moves away, a trap behind a capture — is simply missed. If that move is refuted
+ *    by more than `glanceMaxLoss` at the level's full depth, the player notices and calculates;
+ *  - `slip`: one of the `slipTopN` next-best moves that lose `slipMinLoss`..`slipMaxLoss` by
+ *    the level's own full-depth scores (a slightly wrong choice among good-looking moves);
+ *  - otherwise the best move by the full-depth scores plus gaussian `noise` (noisy judgement).
+ * byDepth[d]: scores of every root move at depth d (1..depth). Returns { k, kind } with kind
+ * 'best' (a best-scored move), 'noise', 'random', 'glance' or 'slip' (a worse-scored move).
+ */
+export function chooseHumanMove(byDepth, depth, P, rng, safe) {
+  const deep = byDepth[depth];
+  const n = deep.length;
+  let bestK = 0;
+  for (let k = 1; k < n; k++) if (deep[k] > deep[bestK]) bestK = k;
+  const best = deep[bestK];
+  const kindOf = (k, kind) => ({ k, kind: deep[k] >= best ? 'best' : kind });
+  if (n === 1) return kindOf(0, 'best');
+  if (P.random > 0 && rng() < P.random) {
+    const pool = safe();
+    return kindOf(pool[Math.floor(rng() * pool.length)], 'random');
+  }
+  if (P.glance > 0 && depth > 1 && rng() < P.glance) {
+    const g = byDepth[Math.max(1, Math.min(depth - 1, P.glanceDepth | 0))];
+    let pick = 0;
+    let pickV = -INF;
+    for (let k = 0; k < n; k++) {
+      const v = g[k] + (P.noise > 0 ? gaussian(rng) * P.noise : 0);
+      if (v > pickV) {
+        pickV = v;
+        pick = k;
+      }
+    }
+    if (best - deep[pick] <= P.glanceMaxLoss) return kindOf(pick, 'glance');
+  }
+  if (P.slip > 0 && rng() < P.slip) {
+    const lo = best - P.slipMaxLoss;
+    const hi = best - P.slipMinLoss;
+    const cand = [];
+    for (let k = 0; k < n; k++) if (deep[k] >= lo && deep[k] <= hi) cand.push(k);
+    if (cand.length) {
+      cand.sort((x, y) => deep[y] - deep[x]);
+      const top = Math.max(1, Math.min(cand.length, P.slipTopN | 0));
+      return kindOf(cand[Math.floor(rng() * top)], 'slip');
+    }
+  }
+  let pick = bestK;
+  let bestNoisy = -INF;
+  for (let k = 0; k < n; k++) {
+    const v = deep[k] + (P.noise > 0 ? gaussian(rng) * P.noise : 0);
+    if (v > bestNoisy) {
+      bestNoisy = v;
+      pick = k;
+    }
+  }
+  return kindOf(pick, 'noise');
 }
 
 function moveText(variantId, from, to, isCapture) {
@@ -592,13 +723,16 @@ function mateInfo(score) {
 function* searchSteps(state, opts, sliceMs) {
   const t0 = now();
   const level = clampLevel(opts.level === undefined ? 3 : opts.level);
-  // `params` (testing / tuning only) overrides individual level parameters
-  const P = opts.params && typeof opts.params === 'object' ? { ...LEVEL_PARAMS[level], ...opts.params } : LEVEL_PARAMS[level];
+  const giveaway = !!(state.options && state.options.giveaway);
+  // the level's parameters (giveaway overrides included); `params` (testing / tuning only)
+  // overrides individual values
+  const P = levelParams(level, giveaway, opts.params);
   const timeMs = Number.isFinite(opts.timeMs) && opts.timeMs > 0 ? opts.timeMs : P.timeMs;
   const maxDepth = Math.max(1, Math.min(60, Number.isFinite(opts.maxDepth) && opts.maxDepth > 0 ? opts.maxDepth | 0 : P.maxDepth));
   const maxNodes = Number.isFinite(opts.maxNodes) && opts.maxNodes > 0 ? opts.maxNodes : Infinity;
   const rng = makeRng(opts.seed);
-  const giveaway = !!(state.options && state.options.giveaway);
+  const qMax = Number.isFinite(P.qMax) && P.qMax >= 0 ? Math.min(UNLIMITED_Q, P.qMax | 0) : UNLIMITED_Q;
+  const [qLo, qHi] = qSalt(qMax);
   const hardDeadline = t0 + timeMs;
 
   const engineMoves = legalMoves(state);
@@ -607,6 +741,7 @@ function* searchSteps(state, opts, sliceMs) {
   const done = (r) => {
     const ms = now() - t0;
     if (r.score === 0) r.score = 0; // no -0 from negation
+    if (r.bestScore === 0) r.bestScore = 0;
     if (r.scores) for (const x of r.scores) if (x.score === 0) x.score = 0;
     r.timeMs = Math.round(ms);
     r.nps = ms > 0 ? Math.round((r.nodes * 1000) / ms) : 0;
@@ -614,7 +749,8 @@ function* searchSteps(state, opts, sliceMs) {
     return r;
   };
   if (engineMoves.length === 0) {
-    return done({ path: null, score: giveaway ? MATE : -MATE, depth: 0, selDepth: 0, nodes: 0, mate: 0, pv: [], forced: false });
+    const score = giveaway ? MATE : -MATE;
+    return done({ path: null, score, depth: 0, selDepth: 0, nodes: 0, mate: 0, pv: [], forced: false, choice: 'none', bestScore: score });
   }
 
   const evalSeed = (rng() * 4294967296) | 0;
@@ -627,12 +763,13 @@ function* searchSteps(state, opts, sliceMs) {
     S.jitter = P.jitter;
     S.seed = evalSeed;
     S.threatExt = P.threatExt;
+    S.qMax = qMax;
     S.lmr = P.lmr;
     S.rootTurn = S.b.turn;
     S.contempt = rootContempt(S.b, P, giveaway);
     const mode = S.contempt === 0 ? 0 : S.rootTurn === 1 ? 1 : 2;
-    S.saltLo = SALT_LO[mode];
-    S.saltHi = SALT_HI[mode];
+    S.saltLo = SALT_LO[mode] ^ qLo;
+    S.saltHi = SALT_HI[mode] ^ qHi;
   };
   attach();
   prepareTables(state.variantId, giveaway, !!opts.newGame);
@@ -643,7 +780,7 @@ function* searchSteps(state, opts, sliceMs) {
 
   if (engineMoves.length === 1) {
     const score = staticEval();
-    return done({ path: engineMoves[0].path.slice(), score, depth: 0, selDepth: 0, nodes: 0, mate: 0, pv: [], forced: true });
+    return done({ path: engineMoves[0].path.slice(), score, depth: 0, selDepth: 0, nodes: 0, mate: 0, pv: [], forced: true, choice: 'forced', bestScore: score });
   }
 
   const list = buildRoot(S.b, engineMoves).list;
@@ -678,17 +815,19 @@ function* searchSteps(state, opts, sliceMs) {
 
   let best = list[0];
   let bestScore = 0;
+  let topScore = null;
+  let choice = 'best';
   let completedDepth = 0;
   let rootScores = null;
 
   if (P.multiPV || opts.allScores) {
-    let scores = null;
+    const byDepth = [];
     outer: for (let d = 1; d <= maxDepth; d++) {
       for (;;) {
         beginSlice();
         const sc = rootMultiPV(list, d, ext);
         if (sc) {
-          scores = sc;
+          byDepth[d] = sc;
           completedDepth = d;
           break;
         }
@@ -699,22 +838,21 @@ function* searchSteps(state, opts, sliceMs) {
       }
       if (now() - t0 > timeMs * 0.45 || S.nodes > maxNodes * 0.45) break;
     }
-    if (!scores) scores = list.map(() => 0);
-    let pick = 0;
-    if (P.blunder > 0 && rng() < P.blunder) {
-      pick = Math.floor(rng() * list.length);
-    } else {
-      let bestNoisy = -Infinity;
-      for (let k = 0; k < list.length; k++) {
-        const noisy = scores[k] + (P.noise > 0 ? gaussian(rng) * P.noise : 0);
-        if (noisy > bestNoisy) {
-          bestNoisy = noisy;
-          pick = k;
-        }
+    if (completedDepth === 0) byDepth[0] = list.map(() => 0);
+    const scores = byDepth[completedDepth];
+    const safe = () => safeMoves(state, list, giveaway, byDepth[Math.min(1, completedDepth)], P.suicide);
+    const pickInfo = chooseHumanMove(byDepth, completedDepth, P, rng, safe);
+    let k = pickInfo.k;
+    // a considered move: promote when it costs nothing (see the full search below)
+    if ((pickInfo.kind === 'best' || pickInfo.kind === 'noise') && !list[k].em.promotion) {
+      for (let j = 0; j < list.length; j++) {
+        if (list[j].em.promotion && scores[j] >= scores[k] - PROMOTE_MARGIN && (!list[k].em.promotion || scores[j] > scores[k])) k = j;
       }
     }
-    best = list[pick];
-    bestScore = scores[pick];
+    best = list[k];
+    bestScore = scores[k];
+    choice = k === pickInfo.k ? pickInfo.kind : scores[k] >= Math.max(...scores) ? 'best' : 'noise';
+    topScore = Math.max(...scores);
     if (opts.allScores) {
       rootScores = list.map((r, k) => ({ path: r.em.path.slice(), score: scores[k] })).sort((x, y) => y.score - x.score);
     }
@@ -751,7 +889,7 @@ function* searchSteps(state, opts, sliceMs) {
     // Promote when it costs nothing: an unstoppable promotion often scores the same now or
     // later (the horizon sees the king either way), but delaying it looks careless.
     if (completedDepth >= 1 && !best.em.promotion && !outOfTime()) {
-      const margin = 12;
+      const margin = PROMOTE_MARGIN;
       const bound = bestScore - margin;
       for (const r of list) {
         if (!r.em.promotion || r === best) continue;
@@ -759,7 +897,7 @@ function* searchSteps(state, opts, sliceMs) {
         for (;;) {
           beginSlice();
           S.b.make(r.i);
-          sc = -negamax(completedDepth - 1, -bound, -(bound - 1), 1, ext);
+          sc = -negamax(completedDepth - 1, -bound, -(bound - 1), 1, ext, 0);
           S.b.unmake(r.i);
           if (!S.stop || outOfTime() || sliceMs <= 0) break;
           pause();
@@ -792,6 +930,11 @@ function* searchSteps(state, opts, sliceMs) {
     mate: mateInfo(bestScore),
     pv,
     forced: false,
+    // how the move was chosen: 'best' | 'noise' | 'random' | 'glance' | 'slip' (see chooseHumanMove),
+    // 'forced' (single legal move), 'none' (no legal move)
+    choice,
+    // the level's own score of its best move (= score unless the level chose a worse one)
+    bestScore: topScore === null ? bestScore : topScore,
     ...(rootScores ? { scores: rootScores } : {}),
   });
 }
