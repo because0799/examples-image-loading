@@ -1,6 +1,8 @@
-// Main menu: play vs AI / two players / AI battle, rules / stats / settings, EPIC toggle.
+// Main menu: play vs AI / two players / AI battle, the «Валькирии доски» RPG mode (big tile with a
+// key-art thumbnail and a NEW badge -> ui.emit('open-rpg')), rules / stats / settings, EPIC toggle.
 
 import { h, tap } from '../dom.js';
+import { RPG_ASSETS } from '../../rpg/assets.js';
 import { t } from '../i18n.js';
 import { icon } from '../icons.js';
 import { logo } from '../logo.js';
@@ -36,6 +38,41 @@ export function createMenu(ui) {
       icon(name, 'tile__icon'),
       h('span.tile__label', label),
     );
+
+  // «Валькирии доски» (盤上戦姫): the anime RPG mode (src/rpg, integration: src/rpg/controller.js)
+  let keyart = null;
+  try {
+    keyart = RPG_ASSETS.keyart;
+  } catch (e) {
+    keyart = null;
+  }
+  const thumb = h('span.menu-rpg__art', { 'aria-hidden': 'true' });
+  if (keyart) {
+    thumb.appendChild(
+      h('img.menu-rpg__img', {
+        src: keyart,
+        alt: '',
+        draggable: 'false',
+        decoding: 'async',
+        on: { error: (e) => thumb.classList.add('is-missing') || e.target.remove() },
+      }),
+    );
+  } else thumb.classList.add('is-missing');
+  const rpgTile = h(
+    'button.menu-rpg',
+    { type: 'button', 'aria-label': `${t('menu.rpg')} ${t('menu.rpgSub')}`, on: { click: tap(() => ui.emit('open-rpg'), { sound: 'gong', haptic: 14 }) } },
+    h('span.menu-rpg__bg'),
+    h('span.menu-rpg__shine'),
+    thumb,
+    h(
+      'span.menu-rpg__text',
+      h('span.menu-rpg__jp', '盤上戦姫'),
+      h('span.menu-rpg__label', { 'data-fit': '16' }, t('menu.rpg')),
+      h('span.menu-rpg__sub', t('menu.rpgSub')),
+    ),
+    h('span.menu-rpg__badge', t('menu.rpgNew')),
+    icon('chevron', 'menu-rpg__go'),
+  );
 
   const toggle = epicToggle({
     on: ui.isEpic,
@@ -78,6 +115,7 @@ export function createMenu(ui) {
           onClick: () => ui.showScreen('setup', { mode: 'demo' }),
         }),
       ),
+      rpgTile,
       h(
         'div.menu__tiles',
         tile('rules', t('menu.rules'), 'rules'),

@@ -2685,3 +2685,190 @@
     font-size: 24px;
   }
 }
+
+/* ---------------------------------------------------------------- «Валькирии доски» entry tile
+   (menu.js -> ui.emit('open-rpg')): a big gold-framed tile with a key-art thumbnail and a NEW
+   badge, styled like the RPG mode itself (same look in both classic and EPIC themes). */
+.menu-rpg {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 88px;
+  margin-top: 4px;
+  padding: 8px 38px 8px 8px;
+  text-align: left;
+  color: #fff;
+  isolation: isolate;
+  border-radius: var(--radius);
+  transition: transform 0.12s;
+}
+.menu-rpg:active {
+  transform: scale(0.97);
+}
+.menu-rpg__bg {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  border-radius: inherit;
+  background: radial-gradient(120% 150% at 0% 0%, rgba(255, 79, 216, 0.38), rgba(255, 79, 216, 0) 55%),
+    radial-gradient(110% 150% at 100% 100%, rgba(106, 240, 255, 0.26), rgba(106, 240, 255, 0) 55%),
+    linear-gradient(135deg, #2c1b74 0%, #170e44 55%, #0b0726 100%);
+  border: 1.5px solid rgba(255, 219, 143, 0.8);
+  box-shadow: inset 0 1px 0 rgba(255, 243, 204, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.35), 0 8px 22px rgba(120, 60, 255, 0.35);
+}
+.menu-rpg__shine {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.menu-rpg__shine::before {
+  content: '';
+  position: absolute;
+  top: -40%;
+  bottom: -40%;
+  left: -45%;
+  width: 34%;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0), rgba(255, 240, 210, 0.2), rgba(255, 255, 255, 0));
+  transform: translateX(0) skewX(-18deg);
+  animation: menu-rpg-shine 5.2s ease-in-out 1.4s infinite;
+}
+@keyframes menu-rpg-shine {
+  0%,
+  72% {
+    transform: translateX(0) skewX(-18deg);
+  }
+  100% {
+    transform: translateX(520%) skewX(-18deg);
+  }
+}
+.menu-rpg__art {
+  position: relative;
+  flex: 0 0 auto;
+  width: 108px;
+  height: 72px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.5px solid #ffdb8f;
+  background: radial-gradient(90% 90% at 30% 20%, rgba(255, 210, 63, 0.45), rgba(255, 210, 63, 0) 60%),
+    radial-gradient(90% 90% at 80% 80%, rgba(255, 79, 216, 0.45), rgba(255, 79, 216, 0) 60%), #1a1050;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+.menu-rpg__art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 40%, rgba(11, 7, 38, 0.35));
+}
+.menu-rpg__art.is-missing::before {
+  content: '盤上戦姫';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Dela Gothic One', sans-serif;
+  font-size: 15px;
+  color: #ffdb8f;
+}
+.menu-rpg__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 30%;
+}
+.menu-rpg__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.1;
+}
+.menu-rpg__jp {
+  font-family: 'Dela Gothic One', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  color: #ffdb8f;
+}
+.menu-rpg__label {
+  margin-top: 2px;
+  font-family: 'Russo One', 'Oswald', sans-serif;
+  font-size: 21px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #fff6dc;
+  text-shadow: 0 0 12px rgba(255, 79, 216, 0.55), 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+.menu-rpg__sub {
+  margin-top: 4px;
+  font-family: 'Oswald', sans-serif;
+  font-size: 12.5px;
+  line-height: 1.2;
+  color: rgba(235, 228, 255, 0.85);
+}
+.menu-rpg__badge {
+  position: absolute;
+  top: -9px;
+  right: 12px;
+  padding: 4px 10px 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff4fd8, #ff8a3c);
+  font: 700 11px/1 'Oswald', sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(255, 79, 216, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.35);
+  transform: rotate(3deg);
+}
+.menu-rpg__go {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #ffdb8f;
+}
+.menu-rpg__go svg {
+  width: 22px;
+  height: 22px;
+}
+.ui-root.q-low .menu-rpg__shine,
+.ui-root.is-battery .menu-rpg__shine,
+.ui-root.no-flashes .menu-rpg__shine {
+  display: none;
+}
+.ui-root.q-low .menu-rpg__bg,
+.ui-root.is-battery .menu-rpg__bg {
+  box-shadow: inset 0 1px 0 rgba(255, 243, 204, 0.35);
+}
+@media (max-width: 359px) {
+  .menu-rpg__art {
+    width: 84px;
+    height: 60px;
+  }
+  .menu-rpg__label {
+    font-size: 18px;
+  }
+}
+@media (max-height: 700px) and (orientation: portrait) {
+  .menu-rpg {
+    min-height: 76px;
+  }
+  .menu-rpg__art {
+    height: 62px;
+    width: 94px;
+  }
+}
+@media (orientation: landscape) and (max-height: 560px) {
+  .menu {
+    grid-template-areas: 'logo main' 'chip main' 'rpg main' 'epic tiles';
+  }
+  .menu-rpg {
+    grid-area: rpg;
+    margin-top: 0;
+  }
+}

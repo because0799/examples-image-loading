@@ -7,8 +7,9 @@
 //   move / basic / jump = role defaults (rules.js ROLES), copied here so a hero is self-contained;
 //                         quirks/passives may modify them through rules/mods.
 //   voice  = archetype id in voice-lines.js (null for Rare heroes — no voice acting)
-//   art    = generation prompt (16:9, 1280×720) + focal = expected face position (0..1) for the
-//            circular board token / portrait crops.
+//   art    = generation prompt (16:9, 1280×720) + focal = face position (0..1) for the circular
+//            board token / portrait crops (measured values copied from RPG_ASSETS.focal /
+//            assets/rpg/crops.json at integration; RPG_ASSETS.focal stays the source of truth).
 
 const cp = (o) => JSON.parse(JSON.stringify(o));
 
@@ -147,7 +148,7 @@ export const HEROES = [
     voice: 'radiant-sovereign',
     art: {
       prompt: artPrompt('f', 'mythic', 'Subject: an adult woman, a divine queen-knight of light. Long flowing platinum-blonde hair with a single side braid, golden eyes, serene confident smile. A radiant halo of eight golden star points floats behind her head; a pair of large luminous white-gold feathered wings. Outfit: high-collared white and gold plate armour over a long flowing white skirt-cape, long sleeves, gauntlets, a black-and-gold checkered sash at the waist. Weapon: a huge greatsword of crystallised starlight held diagonally across her body. Palette: white, warm gold, pale sky blue. Background: a celestial throne hall floating in a sunrise sky, beams of light falling across a giant floating checkerboard floor.'),
-      focal: { x: 0.5, y: 0.27 },
+      focal: { x: 0.466, y: 0.175 },
     },
   },
   {
@@ -237,7 +238,7 @@ export const HEROES = [
     voice: 'eclipse-empress',
     art: {
       prompt: artPrompt('f', 'mythic', 'Subject: an adult woman, an imperial sorceress of the eclipse. Long straight black hair with magenta inner highlights, pale skin, violet-magenta eyes, calm imperious expression. A black eclipse-sun halo with a magenta corona behind her head; translucent wings made of starry night sky. Outfit: high-necked black and deep-violet imperial gown with long sleeves, layered skirt embroidered with constellations, silver crescent jewellery. Weapon: a slender crescent-topped sceptre, with an orb of black flame floating above her raised palm. Palette: black, magenta-crimson, lavender. Background: a dark palace balcony under a total solar eclipse, ink-like shadow tendrils and drifting stars.'),
-      focal: { x: 0.5, y: 0.26 },
+      focal: { x: 0.514, y: 0.182 },
     },
   },
 
@@ -325,7 +326,7 @@ export const HEROES = [
     voice: 'cool-marksman',
     art: {
       prompt: artPrompt('f', 'legendary', 'Subject: an adult woman, a cool-headed thunder sniper. Short asymmetrical lavender bob with one longer side lock, sharp violet eyes, a small crystal targeting lens over one eye, focused expression. Outfit: long dark-navy military greatcoat with violet trim, high collar, long sleeves, fitted gloves and tall boots. Weapon: a large ornate crossbow-railgun crackling with violet lightning, aimed in a firing stance with one knee raised. Palette: violet, dark navy, white. Background: a storm-lashed watchtower rooftop at night, lightning across purple clouds.'),
-      focal: { x: 0.47, y: 0.28 },
+      focal: { x: 0.423, y: 0.214 },
     },
   },
   {
@@ -411,7 +412,7 @@ export const HEROES = [
     voice: 'frost-noble',
     art: {
       prompt: artPrompt('f', 'legendary', 'Subject: an adult woman, an aristocratic ice-queen guardian. Long silver-white hair in an elegant updo with an ice-crystal tiara, pale blue eyes, poised proud expression. Outfit: high-collared pale-blue and white armoured gown with a structured breastplate, long sleeves, a short fur-trimmed cape. Weapon: a tall crystalline tower shield in one hand and a slender ice lance in the other. Palette: ice cyan, white, deep royal blue. Background: a frozen palace hall of glacier pillars and icicle chandeliers, snow drifting in blue light.'),
-      focal: { x: 0.5, y: 0.27 },
+      focal: { x: 0.517, y: 0.167 },
     },
   },
   {
@@ -496,7 +497,7 @@ export const HEROES = [
     voice: 'elder-sister',
     art: {
       prompt: artPrompt('f', 'legendary', 'Subject: an adult woman, a flamboyant phoenix sorceress. Long voluminous crimson hair turning into flame at the tips, amber eyes, playful confident smirk; flaming phoenix feathers fan out behind her like wings. Outfit: high-necked crimson and gold sorceress dress with long sleeves and a layered flame-pattern skirt, gold arm cuffs. Weapon: an ornate folding fan made of fire and a burning phoenix-feather staff. Palette: crimson-orange, gold, dark wine. Background: a volcanic twilight sky with a rising phoenix of fire and swirling embers.'),
-      focal: { x: 0.5, y: 0.27 },
+      focal: { x: 0.484, y: 0.164 },
     },
   },
   {
@@ -580,7 +581,7 @@ export const HEROES = [
     voice: 'hot-blood',
     art: {
       prompt: artPrompt('f', 'legendary', 'Subject: an adult woman, a tomboyish wind ninja. Short messy dark-teal hair with a long swallow-tail ponytail, bright green eyes, cocky grin, a small scar on one cheek. Outfit: fitted dark-navy ninja jacket with long sleeves and a high collar, a long jade-green scarf trailing in the wind, wrapped forearms, shorts over full-length leggings and tall boots. Weapon: two reverse-grip short blades; swirls of wind and swallow feathers around her as she leaps through the air. Palette: jade green, dark navy, white. Background: cliffs above a sea of clouds with strong wind streaks.'),
-      focal: { x: 0.52, y: 0.26 },
+      focal: { x: 0.508, y: 0.239 },
     },
   },
 
@@ -662,7 +663,7 @@ export const HEROES = [
     voice: 'quiet-whisper',
     art: {
       prompt: artPrompt('f', 'epic', 'Subject: an adult woman, a gentle tide priestess and lighthouse keeper. Long wavy sea-blue hair with white seashell hairpins, soft blue eyes, calm kind smile. Outfit: layered white and ocean-blue priestess robes with wide long sleeves and a long skirt, a rope belt with a small brass bell. Weapon: a tall staff topped with a large bronze bell and a hanging lantern filled with glowing water. Palette: ocean blue, aqua, warm white. Background: a lighthouse on a rocky shore at twilight with gently glowing waves.'),
-      focal: { x: 0.5, y: 0.28 },
+      focal: { x: 0.476, y: 0.182 },
     },
   },
   {
@@ -738,7 +739,7 @@ export const HEROES = [
     voice: 'hot-blood',
     art: {
       prompt: artPrompt('f', 'epic', 'Subject: an adult woman, a hot-blooded flame swordswoman. Long bright scarlet hair in a high ponytail tied with a black ribbon, fierce red-orange eyes, determined grin. Outfit: a crimson and black battle jacket in a kimono style with long sleeves over a fitted black high-necked bodysuit, an armoured shoulder guard, wide trousers and boots. Weapon: a katana wreathed in fire, swung forward in a charging stance. Palette: scarlet, orange, black. Background: a sunrise battlefield with burning embers under a red sky.'),
-      focal: { x: 0.5, y: 0.27 },
+      focal: { x: 0.52, y: 0.265 },
     },
   },
   {
@@ -811,7 +812,7 @@ export const HEROES = [
     voice: 'trickster',
     art: {
       prompt: artPrompt('f', 'epic', 'Subject: an adult woman, a mischievous storm witch. Fluffy medium-length violet hair with yellow lightning-shaped streaks, a tall crooked witch hat with a copper lightning rod on top, bright yellow eyes, teasing wink; a small grumpy storm-cloud pet floats beside her. Outfit: high-collared purple witch coat with long sleeves and yellow trim, a long skirt, striped stockings and boots. Weapon: a staff shaped like a lightning rod crackling with sparks, which she sits on sideways. Palette: violet, electric yellow, dark plum. Background: a crooked wizard tower in a thunderstorm.'),
-      focal: { x: 0.5, y: 0.29 },
+      focal: { x: 0.465, y: 0.237 },
     },
   },
   {
@@ -882,7 +883,7 @@ export const HEROES = [
     voice: 'cool-marksman',
     art: {
       prompt: artPrompt('f', 'epic', 'Subject: an adult woman, a quiet petite snow archer. Straight shoulder-length white hair with pale-blue tips and a snowflake hair clip, calm light-blue eyes, focused gentle expression. Outfit: a white fur-lined hooded winter coat with long sleeves, a pale-blue scarf, fingerless mittens, a long skirt over leggings, boots. Weapon: a crystal ice bow drawn with an arrow of frost. Palette: white, ice blue, slate blue. Background: a silent snowy pine forest at dusk with falling snow.'),
-      focal: { x: 0.48, y: 0.28 },
+      focal: { x: 0.412, y: 0.215 },
     },
   },
   {
@@ -961,7 +962,7 @@ export const HEROES = [
     voice: 'gentle-saint',
     art: {
       prompt: artPrompt('f', 'epic', 'Subject: an adult woman, a gentle candle cleric. Soft wavy honey-blonde hair in a low side braid, warm amber eyes, shy kind smile. Outfit: a cream-white and gold cleric habit with long sleeves and a high collar, a short cape embroidered with a sun. Weapon: a tall staff topped with a glowing lantern-candle; warm motes of light float around her. Palette: warm white, honey gold, soft peach. Background: a cathedral interior at dawn with stained-glass light beams and floating candles.'),
-      focal: { x: 0.5, y: 0.28 },
+      focal: { x: 0.494, y: 0.203 },
     },
   },
   {
@@ -1035,7 +1036,7 @@ export const HEROES = [
     voice: 'quiet-whisper',
     art: {
       prompt: artPrompt('f', 'epic', 'Subject: an adult woman, a silent crow assassin. Straight black hair in a blunt princess cut with a few crimson-magenta streaks, half-lidded grey eyes, calm expressionless face, a black feather earring. Outfit: a long black feathered cloak with a high collar over a fitted dark-grey long-sleeved bodysuit, a crimson sash, gloves and boots. Weapon: two black kunai-like blades; crow feathers swirl around her. Palette: black, crimson-magenta, cool grey. Background: moonlit rooftops of a fantasy city at midnight with a flock of crows.'),
-      focal: { x: 0.5, y: 0.27 },
+      focal: { x: 0.527, y: 0.165 },
     },
   },
   {
@@ -1119,7 +1120,7 @@ export const HEROES = [
     voice: 'elder-sister',
     art: {
       prompt: artPrompt('f', 'epic', 'Subject: an adult woman, a cheerful sturdy amber guardian. Long honey-brown hair in two thick braids, warm amber eyes, big confident smile, athletic build. Outfit: bronze and amber plate armour over a long-sleeved brown tunic, a layered armoured skirt, an embroidered folk-pattern sash, heavy boots. Weapon: a huge round shield studded with glowing amber crystals and a stone war hammer resting on her shoulder. Palette: amber, bronze-brown, cream. Background: a canyon of amber-crystal rock formations in golden afternoon light.'),
-      focal: { x: 0.5, y: 0.27 },
+      focal: { x: 0.477, y: 0.146 },
     },
   },
   {
@@ -1193,7 +1194,7 @@ export const HEROES = [
     voice: 'sunny-dancer',
     art: {
       prompt: artPrompt('f', 'epic', 'Subject: an adult woman, a graceful maple wind dancer. Long auburn-red hair with green inner highlights flowing in the wind, a maple-leaf hair ornament, bright green eyes, joyful smile. Outfit: an autumn-coloured dancer’s outfit with long flowing sleeves, a high collar, a layered skirt over leggings, a jade sash. Weapon: two folding war fans with bladed edges; red maple leaves whirl around her as she spins. Palette: maple red-orange, jade green, warm gold. Background: an autumn mountain shrine path with whirling red maple leaves.'),
-      focal: { x: 0.51, y: 0.27 },
+      focal: { x: 0.447, y: 0.19 },
     },
   },
 
@@ -1270,7 +1271,7 @@ export const HEROES = [
     voice: null,
     art: {
       prompt: artPrompt('m', 'rare', 'Subject: an adult man, a burly blacksmith knight. Short dark-brown hair and a neat short beard, a smudge of soot on his cheek, warm brown eyes, gruff but kind expression. Outfit: a heavy leather blacksmith apron over dark plate armour with glowing red-hot seams, long sleeves, thick gloves, boots. Weapon: a massive forge hammer and a riveted iron shield glowing orange at the rim. Palette: fire orange, iron grey, brass. Background: a forge workshop full of sparks and molten metal.'),
-      focal: { x: 0.5, y: 0.27 },
+      focal: { x: 0.505, y: 0.135 },
     },
   },
   {
@@ -1341,7 +1342,7 @@ export const HEROES = [
     voice: null,
     art: {
       prompt: artPrompt('f', 'rare', 'Subject: an adult woman, a cheerful sea corsair swordswoman. Wavy sea-blue hair in a short ponytail under a tricorn hat, tanned skin, bright blue eyes, confident grin. Outfit: a white long-sleeved shirt with a buttoned navy waistcoat, a red sash, a long navy coat, trousers and boots. Weapon: a curved cutlass dripping with seawater. Palette: navy blue, sand beige, red. Background: the deck of a ship on sunny waves with sea spray.'),
-      focal: { x: 0.5, y: 0.28 },
+      focal: { x: 0.534, y: 0.186 },
     },
   },
   {
@@ -1412,7 +1413,7 @@ export const HEROES = [
     voice: null,
     art: {
       prompt: artPrompt('f', 'rare', 'Subject: an adult woman, a stern northern harpoon hunter. Long dark-blue hair in a single thick braid, grey-blue eyes, serious calm expression. Outfit: a hooded oilskin coat over a thick knitted sweater, a fur collar, leather bracers, long trousers and boots. Weapon: a long harpoon with a coiled rope. Palette: deep blue, steel grey, leather brown. Background: an icy northern harbour with grey waves.'),
-      focal: { x: 0.5, y: 0.28 },
+      focal: { x: 0.439, y: 0.154 },
     },
   },
   {
@@ -1486,7 +1487,7 @@ export const HEROES = [
     voice: null,
     art: {
       prompt: artPrompt('f', 'rare', 'Subject: an adult woman, a gentle snow healer. Fluffy white hair in a low bun with a snowflake brooch, sleepy pale-blue eyes, soft smile. Outfit: a long white and pale-blue winter healer’s dress with long sleeves, an apron with pockets, a knitted shawl. Weapon: a small staff topped with an ice crystal and a roll of glowing frost bandages. Palette: white, pale cyan, soft pink. Background: a cosy snowy village courtyard at dusk with warm windows.'),
-      focal: { x: 0.5, y: 0.28 },
+      focal: { x: 0.499, y: 0.165 },
     },
   },
   {
@@ -1557,7 +1558,7 @@ export const HEROES = [
     voice: null,
     art: {
       prompt: artPrompt('f', 'rare', 'Subject: an adult woman, an energetic lightning courier. Short spiky violet hair with yellow goggles pushed up on her forehead, bright yellow eyes, cheeky grin. Outfit: a fitted purple messenger jacket with long sleeves, a satchel stuffed with letters, fingerless gloves, shorts over full-length leggings, running boots trailing sparks. Weapon: a short lightning dagger; she is mid-sprint with electric trails behind her. Palette: violet, electric yellow, black. Background: city rooftops under a thundery evening sky.'),
-      focal: { x: 0.52, y: 0.28 },
+      focal: { x: 0.484, y: 0.26 },
     },
   },
   {
@@ -1632,7 +1633,7 @@ export const HEROES = [
     voice: null,
     art: {
       prompt: artPrompt('f', 'rare', 'Subject: an adult woman, a dreamy wind bard. Long light-green hair with feather ornaments, sky-blue eyes, gentle singing expression. Outfit: a cream and green travelling bard’s tunic dress with long sleeves, a short feathered cape, boots. Weapon: a lyre-like harp shaped like a pair of bird wings; ribbons of wind and music swirl around her. Palette: mint green, cream, sky blue. Background: a grassy hilltop with windmills and birds in a bright sky.'),
-      focal: { x: 0.5, y: 0.28 },
+      focal: { x: 0.531, y: 0.172 },
     },
   },
   {
@@ -1703,7 +1704,7 @@ export const HEROES = [
     voice: null,
     art: {
       prompt: artPrompt('m', 'rare', 'Subject: an adult man, a stoic stone crossbowman. Short ash-blond hair, light stubble, narrow green eyes, serious expression. Outfit: a hooded olive cloak over brown leather armour with stone-plate pauldrons, long sleeves, gloves and boots. Weapon: a heavy siege crossbow loaded with a stone-tipped bolt, aimed forward. Palette: amber, stone grey, forest green. Background: a rocky canyon with crumbling stone ruins.'),
-      focal: { x: 0.48, y: 0.28 },
+      focal: { x: 0.457, y: 0.221 },
     },
   },
   {
@@ -1779,7 +1780,7 @@ export const HEROES = [
     voice: null,
     art: {
       prompt: artPrompt('f', 'rare', 'Subject: an adult woman, a studious sand-rune architect. Neat shoulder-length teal-black hair, round glasses, amber eyes, thoughtful expression. Outfit: a long sand-coloured architect’s robe with long sleeves, rolled blueprints in a satchel, a belt of measuring tools. Weapon: a stylus drawing glowing amber runes in the air while floating stone blocks orbit her. Palette: sand gold, cream, teal. Background: desert ruins with geometric stone pillars at golden hour.'),
-      focal: { x: 0.5, y: 0.28 },
+      focal: { x: 0.506, y: 0.176 },
     },
   },
   {
@@ -1854,7 +1855,7 @@ export const HEROES = [
     voice: null,
     art: {
       prompt: artPrompt('f', 'rare', 'Subject: an adult woman, an earnest young paladin. Short golden-blonde hair with a straight fringe, bright blue eyes, determined honest expression. Outfit: polished silver plate armour with a long blue tabard bearing a sun emblem, chainmail sleeves, gauntlets and boots. Weapon: a large kite shield glowing with radiant light, raised high, and a short sword. Palette: pale gold, silver, royal blue. Background: a castle courtyard at sunrise with fluttering banners.'),
-      focal: { x: 0.5, y: 0.28 },
+      focal: { x: 0.508, y: 0.16 },
     },
   },
   {
@@ -1925,7 +1926,7 @@ export const HEROES = [
     voice: null,
     art: {
       prompt: artPrompt('f', 'rare', 'Subject: an adult woman, a sly charming night thief. Long dark-purple hair in a loose low ponytail, magenta eyes, playful smirk, a beauty mark under one eye. Outfit: a dark hooded cloak with gold clasps, a fitted long-sleeved black and plum jacket, trousers with many pouches, gloves and boots. Weapon: a dagger twirled in one hand and a stolen golden coin in the other; shadows curl around her feet. Palette: plum-magenta, black, gold. Background: a moonlit night-market alley with paper lanterns.'),
-      focal: { x: 0.5, y: 0.28 },
+      focal: { x: 0.522, y: 0.194 },
     },
   },
 ];

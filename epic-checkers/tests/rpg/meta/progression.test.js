@@ -77,8 +77,9 @@ test('clearing a chapter boss raises the cap and converts full XP bars into leve
 });
 
 test('stats: statsAt + unconditional constellation mods; GDD §19.1 level-30 values', () => {
-  // GDD §19.1 sample rows (HP / ATK / DEF at L30, C0)
-  const rows = { liora: [2296, 842, 161], nocturna: [2044, 846, 115], fuyuka: [2933, 355, 308], akane: [1969, 753, 125], vera: [2438, 310, 245], mara: [1546, 651, 83] };
+  // GDD §19.1 sample rows (HP / ATK / DEF at L30, C0), after the battle engine's balance pass on
+  // heroes.js: Nocturna's ATK 846 → 786 (base 280 → 250, growth 20.7 → 18.5), every Rare ×1.05
+  const rows = { liora: [2296, 842, 161], nocturna: [2044, 786, 115], fuyuka: [2933, 355, 308], akane: [1969, 753, 125], vera: [2560, 327, 258], mara: [1624, 682, 87] };
   for (const [id, [hp, atk, def]] of Object.entries(rows)) {
     const s = heroStatsAt(id, 30, 0);
     assert.deepEqual([s.hp, s.atk, s.def], [hp, atk, def], id);

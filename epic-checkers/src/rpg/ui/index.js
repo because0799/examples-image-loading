@@ -245,9 +245,13 @@ export class RpgUI {
       s.musicVolume = Math.max(0, Math.min(1, Number(patch.musicVolume) || 0));
       if (this.audio && this.audio.setMusicVolume) this.audio.setMusicVolume(s.musicVolume);
     }
+    // battle presentation (integration: src/ui/storage.js knows and persists these fields)
+    if ('rpgUltCinematic' in patch) s.rpgUltCinematic = ['full', 'short', 'first'].includes(patch.rpgUltCinematic) ? patch.rpgUltCinematic : 'full';
+    if ('rpgDamageNumbers' in patch) s.rpgDamageNumbers = patch.rpgDamageNumbers !== false;
     if (!live) {
-      // shared fields go to the app's settings store (it keeps only the fields it knows)
-      if (('sfxVolume' in patch || 'musicVolume' in patch) && !this.storage) {
+      // shared fields go to the app's settings store (it keeps only the fields it knows — the RPG
+      // ones included since the integration)
+      if (!this.storage) {
         try {
           saveSettings(s);
         } catch (e) {

@@ -31,6 +31,7 @@
 //                             the whole canvas (true) or no longer does (false, as it starts closing):
 //                             wire it to renderer.setOccluded(on)
 //   'screen'(name)            a screen became current
+//   'open-rpg'                the «Валькирии доски» tile in the menu was tapped (main.js opens the RPG hub)
 
 import './styles.css';
 import './screens.css';

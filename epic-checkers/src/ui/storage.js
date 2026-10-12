@@ -71,6 +71,8 @@ export const BRAGS = Object.freeze(['off', 'rare', 'normal', 'often']);
 export const AI_PACE_MS = deepFreeze({ fast: 300, normal: 700, slow: 1300 });
 export const PLAYER_NAME_MAX = 16;
 export const FX_RANGES = deepFreeze({ shake: [0, 1.5], particles: [0.25, 1.5] });
+/** «Валькирии доски» Ultimate cinematics (settings.rpgUltCinematic). */
+export const RPG_ULT_CINEMATICS = Object.freeze(['full', 'short', 'first']);
 
 /** Per-effect switches of EPIC BADASS MODE (settings.fx). */
 export const DEFAULT_FX = deepFreeze({
@@ -108,6 +110,11 @@ export const DEFAULT_SETTINGS = deepFreeze({
   playerName: '', //    ≤ 16 chars, trimmed; '' → «Ты» / "You"
   playerColor: 'auto', // 'auto' | 'cyan' | 'gold' | 'green' | 'violet' | 'orange' | 'pink'
   preset: 'balanced', // 'max' | 'balanced' | 'calm' | 'battery' | 'custom' (label, see detectPreset)
+  // «Валькирии доски» (src/rpg): the RPG mode's own settings live on the same shared object
+  rpgVoice: true, //    Japanese hero voice lines (src/rpg/voice.js)
+  voiceVolume: 0.9, //  0..1 voice volume (its own slider: sfxVolume 0 does not mute voices)
+  rpgUltCinematic: 'full', // 'full' | 'short' | 'first' (full the first time each Ultimate is seen, then short)
+  rpgDamageNumbers: true, // floating damage / heal numbers on the RPG board
   fx: DEFAULT_FX,
   lastConfig: DEFAULT_CONFIG,
 });
@@ -328,6 +335,10 @@ export function sanitizeSettings(obj) {
     playerName: cleanPlayerName(s.playerName),
     playerColor: oneOf(s.playerColor, PLAYER_COLORS, d.playerColor),
     preset: 'custom',
+    rpgVoice: bool(s.rpgVoice, d.rpgVoice),
+    voiceVolume: numIn(s.voiceVolume, [0, 1], d.voiceVolume),
+    rpgUltCinematic: oneOf(s.rpgUltCinematic, RPG_ULT_CINEMATICS, d.rpgUltCinematic),
+    rpgDamageNumbers: bool(s.rpgDamageNumbers, d.rpgDamageNumbers),
     fx: sanitizeFx(s.fx),
     lastConfig: sanitizeConfig(s.lastConfig),
   };

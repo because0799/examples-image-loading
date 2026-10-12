@@ -2696,3 +2696,12 @@
 .rv-settings .rv-row .rv-btn {
   width: 100%;
 }
+.rv-settings__seg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+}
+.rv-settings__seg .rv-seg__label {
+  white-space: nowrap;
+}

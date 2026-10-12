@@ -18,6 +18,8 @@
 // The AI worker is bundled first and injected into app.js as the string constant
 // __AI_WORKER_SRC__, so the app can start it from a Blob URL (works under any origin,
 // including the Android WebView asset origin). Use `typeof __AI_WORKER_SRC__ !== 'undefined'`.
+// The «Валькирии доски» battle AI worker (src/rpg/ai/worker.js) is injected the same way as
+// __RPG_AI_WORKER_SRC__ (src/rpg/controller.js starts it; in-thread fallback without it).
 
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
@@ -71,9 +73,9 @@ function buildFonts(outDir) {
   fs.writeFileSync(path.join(outDir, 'fonts.css'), css);
 }
 
-// ---------------------------------------------------------------- worker
-async function buildWorker() {
-  const entry = path.join(ROOT, 'src/ai/worker.js');
+// ---------------------------------------------------------------- workers
+async function buildWorker(rel = 'src/ai/worker.js') {
+  const entry = path.join(ROOT, rel);
   if (!fs.existsSync(entry)) return '';
   const r = await esbuild.build({
     entryPoints: [entry],
@@ -88,7 +90,7 @@ async function buildWorker() {
 }
 
 // ---------------------------------------------------------------- app
-async function buildApp({ entry, outDir, html, workerSrc }) {
+async function buildApp({ entry, outDir, html, workerSrc, rpgWorkerSrc }) {
   fs.mkdirSync(outDir, { recursive: true });
   await esbuild.build({
     entryPoints: { app: entry },
@@ -101,6 +103,7 @@ async function buildApp({ entry, outDir, html, workerSrc }) {
     loader: { '.png': 'dataurl', '.svg': 'text', '.woff2': 'file', '.glsl': 'text', '.frag': 'text', '.vert': 'text' },
     define: {
       __AI_WORKER_SRC__: JSON.stringify(workerSrc || ''),
+      __RPG_AI_WORKER_SRC__: JSON.stringify(rpgWorkerSrc || ''),
       __DEV__: JSON.stringify(dev),
     },
     logLevel: 'warning',
@@ -108,6 +111,7 @@ async function buildApp({ entry, outDir, html, workerSrc }) {
   buildFonts(outDir);
   // readable copy of the embedded worker, for debugging only (never shipped)
   if (workerSrc && (dev || demo)) fs.writeFileSync(path.join(outDir, 'ai-worker.js'), workerSrc);
+  if (rpgWorkerSrc && (dev || demo)) fs.writeFileSync(path.join(outDir, 'rpg-ai-worker.js'), rpgWorkerSrc);
   fs.writeFileSync(path.join(outDir, 'index.html'), html);
 }
 
@@ -124,12 +128,13 @@ const DEFAULT_DEMO_HTML = (name) => `<!doctype html>
 
 const t0 = Date.now();
 const workerSrc = await buildWorker();
+const rpgWorkerSrc = await buildWorker('src/rpg/ai/worker.js');
 if (demo) {
   const entry = path.join(ROOT, 'src/dev', `${demo}.js`);
   const htmlFile = path.join(ROOT, 'src/dev', `${demo}.html`);
   const html = fs.existsSync(htmlFile) ? fs.readFileSync(htmlFile, 'utf8') : DEFAULT_DEMO_HTML(demo);
   const outDir = path.join(ROOT, 'dist/dev', demo);
-  await buildApp({ entry, outDir, html, workerSrc });
+  await buildApp({ entry, outDir, html, workerSrc, rpgWorkerSrc });
   // app.css may not exist if the demo imports no CSS; create an empty one so the link resolves
   if (!fs.existsSync(path.join(outDir, 'app.css'))) fs.writeFileSync(path.join(outDir, 'app.css'), '');
   console.log(`demo ${demo} -> ${path.relative(ROOT, outDir)} (${Date.now() - t0} ms)`);
@@ -138,7 +143,7 @@ if (demo) {
   if (outArg && (outDir === ROOT || outDir === path.parse(outDir).root)) throw new Error(`refusing to build into ${outDir}`);
   fs.rmSync(outDir, { recursive: true, force: true });
   const html = fs.readFileSync(path.join(ROOT, 'web/index.html'), 'utf8');
-  await buildApp({ entry: path.join(ROOT, 'src/main.js'), outDir, html, workerSrc });
+  await buildApp({ entry: path.join(ROOT, 'src/main.js'), outDir, html, workerSrc, rpgWorkerSrc });
   if (!fs.existsSync(path.join(outDir, 'app.css'))) fs.writeFileSync(path.join(outDir, 'app.css'), '');
   // static extras (icons etc.)
   const extra = path.join(ROOT, 'web/static');

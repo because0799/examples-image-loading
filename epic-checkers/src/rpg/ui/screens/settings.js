@@ -1,8 +1,9 @@
 // «Валькирии» — the mode's small settings section (opened from the hub gear and the battle pause
-// menu): hero voices on/off (settings.rpgVoice), voice volume (settings.voiceVolume), and the
-// shared sound / music volumes for convenience.
+// menu): hero voices on/off (settings.rpgVoice), voice volume (settings.voiceVolume), Ultimate
+// cinematics (settings.rpgUltCinematic 'full' | 'short' | 'first'), damage numbers
+// (settings.rpgDamageNumbers), and the shared sound / music volumes for convenience.
 
-import { h, rvSwitch, rvSlider, rvButton } from '../components.js';
+import { h, rvSwitch, rvSlider, rvButton, rvSeg } from '../components.js';
 import { rvIcon } from '../icons.js';
 import { rt } from '../i18n.js';
 import { profileSquad, ownedIds, isVoiced } from '../model.js';
@@ -66,6 +67,33 @@ export function buildSettingsSheet(ui, close) {
             if (sw && sw.setChecked) sw.setChecked(true);
             volBox.classList.remove('is-off');
           },
+        }),
+      ),
+    ),
+    h(
+      'div.rv-panel.rv-settings__battle',
+      stack(
+        'ult',
+        rt('settings.ultCinematic'),
+        h(
+          'div.rv-settings__seg',
+          rvSeg(ui, {
+            label: rt('settings.ultCinematic'),
+            options: ['full', 'short', 'first'].map((v) => ({ value: v, label: rt(`settings.ult.${v}`) })),
+            value: ['full', 'short', 'first'].includes(s.rpgUltCinematic) ? s.rpgUltCinematic : 'full',
+            onChange: (v) => ui.updateSettings({ rpgUltCinematic: v }),
+          }),
+          h('div.rv-row__desc', rt('settings.ultDesc')),
+        ),
+      ),
+      row(
+        'attack',
+        rt('settings.damageNumbers'),
+        rt('settings.damageNumbersDesc'),
+        rvSwitch(ui, {
+          checked: s.rpgDamageNumbers !== false,
+          label: rt('settings.damageNumbers'),
+          onChange: (on) => ui.updateSettings({ rpgDamageNumbers: on }),
         }),
       ),
     ),
